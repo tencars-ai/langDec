@@ -30,8 +30,9 @@ LANGUAGES = {
 
 # Apply custom CSS styling to make text areas use monospace font
 # This makes the aligned output look better
+# Triple quotes for multi-line string
 st.markdown(
-    """  # Triple quotes for multi-line string
+    """
     <style>
       textarea {
         font-family: "Courier New", Courier, monospace !important;
