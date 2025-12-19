@@ -275,17 +275,11 @@ if decode_clicked:
         with st.spinner('Decoding...'):
             # Perform the decoding
             # .strip() removes leading/trailing whitespace from input
-            raw_decoded = decode_text(
+            # The decoder already handles line breaks internally
+            st.session_state.decoded_text = decode_text(
                 input_text.strip(),
                 source_language,
                 target_language,
-            )
-
-            # Apply additional line wrapping to the output
-            # Store result in session state so it persists
-            st.session_state.decoded_text = apply_line_breaks(
-                raw_decoded,
-                max_line_length,
             )
         st.success('Decoding completed!')
     except Exception as e:
