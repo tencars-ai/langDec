@@ -1,9 +1,9 @@
 # Enable modern type hints (allows referencing class names before definition)
 from __future__ import annotations
 
-# Import from services → translator module
+# Import from services → translation_service module
 # TranslationService is the interface (Protocol) for translation providers
-from services.translator import TranslationService
+from services.translation_service import TranslationService
 
 
 class Translator:

@@ -6,9 +6,9 @@ from dataclasses import dataclass
 # List: Type hint for lists, e.g., List[str] means "a list of strings"
 from typing import List
 
-# Import from services → translator module
+# Import from services → translation_service module
 # TranslationService is the interface (Protocol) for translation providers
-from services.translator import TranslationService
+from services.translation_service import TranslationService
 
 
 # @dataclass creates a simple data container class automatically

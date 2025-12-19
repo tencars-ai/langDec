@@ -7,7 +7,7 @@ import streamlit as st
 # Import our custom classes from other files
 from domain.decoder import WordByWordDecoder
 from domain.translator import Translator
-from services.translator import GoogleDeepTranslatorService
+from services.translation_service import GoogleDeepTranslatorService
 
 # Create instances that will be used throughout the app
 # _ prefix indicates these are module-level "private" variables
@@ -40,6 +40,37 @@ st.markdown(
         font-family: "Courier New", Courier, monospace !important;
         font-size: 14px !important;
         line-height: 1.35 !important;
+      }
+      
+      /* Green button for Decode */
+      button[kind="primary"] {
+        background-color: #28a745 !important;
+        border-color: #28a745 !important;
+      }
+      button[kind="primary"]:hover {
+        background-color: #218838 !important;
+        border-color: #1e7e34 !important;
+      }
+      
+      /* Blue button for Translate */
+      button[kind="secondary"] {
+        background-color: #007bff !important;
+        border-color: #007bff !important;
+        color: white !important;
+      }
+      button[kind="secondary"]:hover {
+        background-color: #0056b3 !important;
+        border-color: #004085 !important;
+      }
+      
+      /* Light green background for decoded text area */
+      div[data-testid="stTextArea"] textarea[aria-label="Decoded text (word-by-word)"] {
+        background-color: #d4edda !important;
+      }
+      
+      /* Light blue background for translated text area */
+      div[data-testid="stTextArea"] textarea[aria-label="Translated text (natural translation)"] {
+        background-color: #d1ecf1 !important;
       }
     </style>
     """,
@@ -258,6 +289,7 @@ st.text_area(
     value=st.session_state.decoded_text,        # Content to display
     height=220,                                 # Height in pixels
     help="Select and copy the text (Ctrl/Cmd + C).",  # Help tooltip
+    key="decoded_output",                       # Unique key for styling
 )
 
 # Display the translated output in a second text area
@@ -266,6 +298,7 @@ st.text_area(
     value=st.session_state.translated_text,     # Content to display
     height=220,                                 # Height in pixels
     help="Select and copy the text (Ctrl/Cmd + C).",  # Help tooltip
+    key="translated_output",                    # Unique key for styling
 )
 
 # Create combined output for download
