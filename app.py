@@ -64,13 +64,15 @@ st.markdown(
       }
       
       /* Light green background for decoded text area */
-      div[data-testid="stTextArea"] textarea[aria-label="Decoded text (word-by-word)"] {
+      textarea[aria-label="Decoded text (word-by-word)"] {
         background-color: #d4edda !important;
+        color: black !important;
       }
       
       /* Light blue background for translated text area */
-      div[data-testid="stTextArea"] textarea[aria-label="Translated text (natural translation)"] {
+      textarea[aria-label="Translated text (natural translation)"] {
         background-color: #d1ecf1 !important;
+        color: black !important;
       }
       
       /* White background for download button */
