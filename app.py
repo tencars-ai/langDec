@@ -74,12 +74,12 @@ st.markdown(
       }
       
       /* White background for download button */
-      button[kind="secondary"][data-testid="baseButton-secondary"] {
+      .stDownloadButton > button {
         background-color: white !important;
-        border-color: #cccccc !important;
+        border: 1px solid #cccccc !important;
         color: black !important;
       }
-      button[kind="secondary"][data-testid="baseButton-secondary"]:hover {
+      .stDownloadButton > button:hover {
         background-color: #f8f9fa !important;
         border-color: #999999 !important;
       }
