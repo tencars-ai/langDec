@@ -78,21 +78,34 @@ class WordByWordDecoder:
         Returns:
             Formatted string with aligned translations
         """
-        # Clean up the input: if text is None, use "", then remove whitespace from ends
+        # Clean up the input: if text is None, use ""
         text = (text or "").strip()
         
         # Early return: if text is empty, just return empty string
         if not text:
             return ""
 
-        # Step 1: Split text into individual words
-        tokens = self._tokenize(text)
+        # Process each line separately to preserve line breaks
+        lines = text.split('\n')
+        decoded_lines = []
         
-        # Step 2: Translate each word and create TokenPair objects
-        pairs = self._translate_tokens(tokens, source_lang, target_lang)
+        for line in lines:
+            line = line.strip()
+            # Skip empty lines but preserve them in output
+            if not line:
+                decoded_lines.append("")
+                continue
+                
+            # Step 1: Split line into individual words
+            tokens = self._tokenize(line)
+            
+            # Step 2: Translate each word and create TokenPair objects
+            pairs = self._translate_tokens(tokens, source_lang, target_lang)
+            
+            # Step 3: Format the pairs into aligned two-line output with line breaks
+            decoded_lines.append(self._format_aligned(pairs, max_line_length=max_line_length))
         
-        # Step 3: Format the pairs into aligned two-line output with line breaks
-        return self._format_aligned(pairs, max_line_length=max_line_length)
+        return "\n".join(decoded_lines)
 
     # Methods starting with _ are "private" - meant for internal use only
     def _tokenize(self, text: str) -> List[str]:
