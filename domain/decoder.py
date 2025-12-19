@@ -65,7 +65,7 @@ class WordByWordDecoder:
         text: str,
         source_lang: str,
         target_lang: str,
-        max_line_length: int = 50,  # Default value if not specified TODO: Max lenght defined twice?
+        max_line_length: int,
     ) -> str:
         """Main method to decode text word-by-word.
         
@@ -73,7 +73,7 @@ class WordByWordDecoder:
             text: The text to decode (can be multiple words)
             source_lang: Language code of input text (e.g., "en")
             target_lang: Language code for translation (e.g., "de")
-            max_line_length: Maximum characters per line before breaking (default: 50)
+            max_line_length: Maximum characters per line before breaking
             
         Returns:
             Formatted string with aligned translations
@@ -215,7 +215,7 @@ class WordByWordDecoder:
             # Add the word chunks to current lines
             source_line += source_chunk
             target_line += target_chunk
-            running_width += width
+            running_width += width + 1  # +1 for the space after each word
 
         # Don't forget the last line if there's anything left
         if source_line or target_line:
