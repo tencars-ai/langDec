@@ -199,8 +199,9 @@ class WordByWordDecoder:
             source_chunk = pair.source_token.ljust(width) + " "
             target_chunk = pair.target_token.ljust(width) + " "
 
-            # Check: would adding this word exceed our line length limit?
-            if running_width + width >= max_line_length and source_line:
+            # Check: would adding this word (with space) exceed our line length limit?
+            # We check if adding width+1 (word + space) would exceed the limit
+            if running_width > 0 and running_width + width + 1 > max_line_length:
                 # Yes! Save current lines and start new ones
                 # .rstrip() removes trailing spaces
                 output_lines.append(source_line.rstrip())
