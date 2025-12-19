@@ -278,6 +278,10 @@ if decode_clicked:
                 source_language,
                 target_language,
             )
+            
+            # Debug: Show what we got
+            st.write(f"DEBUG - Raw decoded length: {len(raw_decoded)}")
+            st.write(f"DEBUG - Raw decoded preview: {raw_decoded[:100] if raw_decoded else 'EMPTY'}")
 
             # Apply additional line wrapping to the output
             # Store result in session state so it persists
@@ -285,6 +289,9 @@ if decode_clicked:
                 raw_decoded,
                 max_line_length,
             )
+            
+            # Debug: Show what's in session state
+            st.write(f"DEBUG - Session state length: {len(st.session_state.decoded_text)}")
         st.success('Decoding completed!')
     except Exception as e:
         st.error(f'Error during decoding: {str(e)}')
