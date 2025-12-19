@@ -16,11 +16,15 @@ class TranslationService(Protocol):
     """Abstract interface for translation providers.
     
     This defines what methods a translation service MUST have.
-    Think of it as a contract: any translation service must have a translate_word method.
+    Think of it as a contract: any translation service must have these methods.
     """
 
     def translate_word(self, word: str, source_lang: str, target_lang: str) -> str:
         # The "..." means: "this method must be implemented by concrete classes"
+        ...
+    
+    def translate_text(self, text: str, source_lang: str, target_lang: str) -> str:
+        # Method for translating complete sentences/paragraphs
         ...
 
 
@@ -60,3 +64,24 @@ class GoogleDeepTranslatorService:
         
         # Call the translate method and return the result
         return translator.translate(word)
+    
+    def translate_text(self, text: str, source_lang: str, target_lang: str) -> str:
+        """Translates complete text (sentences/paragraphs) naturally.
+        
+        Args:
+            text: The text to translate (can be multiple sentences)
+            source_lang: Source language code (e.g., "pt" for Portuguese)
+            target_lang: Target language code (e.g., "de" for German)
+            
+        Returns:
+            The translated text as a string
+        """
+        # Use default language if set, otherwise use the provided parameter
+        source = self.source_default or source_lang
+        target = self.target_default or target_lang
+
+        # Create a translator object from the deep_translator library
+        translator = GoogleTranslator(source=source, target=target)
+        
+        # Call the translate method for complete text
+        return translator.translate(text)

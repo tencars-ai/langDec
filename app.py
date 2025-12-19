@@ -6,12 +6,14 @@ import streamlit as st
 
 # Import our custom classes from other files
 from domain.decoder import WordByWordDecoder
+from domain.translator import Translator
 from services.translator import GoogleDeepTranslatorService
 
 # Create instances that will be used throughout the app
 # _ prefix indicates these are module-level "private" variables
 _translation_service = GoogleDeepTranslatorService()  # Creates the translation service
 _decoder = WordByWordDecoder(_translation_service)    # Creates the decoder with the service
+_translator = Translator(_translation_service)        # Creates the translator with the service
 
 # -------------------------------------------------
 # 1) Page configuration
@@ -115,6 +117,25 @@ def decode_text(text: str, source_lang: str, target_lang: str) -> str:
     )
 
 
+def translate_text(text: str, source_lang: str, target_lang: str) -> str:
+    """Wrapper function to call our translator with the right parameters.
+    
+    Args:
+        text: Text to translate
+        source_lang: Source language code
+        target_lang: Target language code
+        
+    Returns:
+        Translated text
+    """
+    # Call the translator's translate method
+    return _translator.translate(
+        text=text,
+        source_lang=source_lang,
+        target_lang=target_lang,
+    )
+
+
 # -------------------------------------------------
 # 4) Configuration section
 # -------------------------------------------------
@@ -172,22 +193,36 @@ input_text = st.text_area(
 if source_language == target_language:
     st.warning("Source and target language are identical.")
 
+# Create two buttons side by side
+# st.columns creates columns for side-by-side layout
+btn_col1, btn_col2 = st.columns(2)
+
 # st.button creates a clickable button
 # Returns True when clicked, False otherwise
-decode_clicked = st.button(
-    "Decode",                          # Button text
-    type="primary",                    # Makes button blue/prominent
-    use_container_width=True,          # Makes button full width
-)
+with btn_col1:
+    decode_clicked = st.button(
+        "Decode",                          # Button text
+        type="primary",                    # Makes button blue/prominent
+        use_container_width=True,          # Makes button full width
+    )
+
+with btn_col2:
+    translate_clicked = st.button(
+        "Translate",                       # Button text
+        type="secondary",                  # Secondary button style
+        use_container_width=True,          # Makes button full width
+    )
 
 # -------------------------------------------------
 # 6) Output section
 # -------------------------------------------------
 # st.session_state is like a dictionary that persists between page reruns
 # It allows us to store data that survives when user interacts with the page
-# Check if 'decoded_text' exists in session state, if not, create it
+# Check if 'decoded_text' and 'translated_text' exist in session state, if not, create them
 if "decoded_text" not in st.session_state:
     st.session_state.decoded_text = ""  # Initialize with empty string
+if "translated_text" not in st.session_state:
+    st.session_state.translated_text = ""  # Initialize with empty string
 
 # Check if the Decode button was clicked
 if decode_clicked:
@@ -206,22 +241,49 @@ if decode_clicked:
         max_line_length,
     )
 
-# Display the output in a text area
+# Check if the Translate button was clicked
+if translate_clicked:
+    # Perform the translation
+    # .strip() removes leading/trailing whitespace from input
+    st.session_state.translated_text = translate_text(
+        input_text.strip(),
+        source_language,
+        target_language,
+    )
+
+# Display the decoded output in a text area
 # This text area is read-only by default (user can select/copy but not edit)
 st.text_area(
-    "Decoded text (output)",                    # Label
+    "Decoded text (word-by-word)",              # Label
     value=st.session_state.decoded_text,        # Content to display
-    height=260,                                 # Height in pixels
+    height=220,                                 # Height in pixels
     help="Select and copy the text (Ctrl/Cmd + C).",  # Help tooltip
 )
 
-# Download button to save the output as a text file
+# Display the translated output in a second text area
+st.text_area(
+    "Translated text (natural translation)",    # Label
+    value=st.session_state.translated_text,     # Content to display
+    height=220,                                 # Height in pixels
+    help="Select and copy the text (Ctrl/Cmd + C).",  # Help tooltip
+)
+
+# Create combined output for download
+combined_output = ""
+if st.session_state.decoded_text:
+    combined_output += "=== DECODED (Word-by-Word) ===\n\n"
+    combined_output += st.session_state.decoded_text + "\n\n"
+if st.session_state.translated_text:
+    combined_output += "=== TRANSLATED (Natural) ===\n\n"
+    combined_output += st.session_state.translated_text + "\n"
+
+# Download button to save both outputs as a text file
 st.download_button(
     "Download output as .txt",                  # Button text
-    data=st.session_state.decoded_text or "",  # File content (or empty if no output)
-    file_name=f"decoded_{source_language}_to_{target_language}.txt",  # f-string for filename
+    data=combined_output or "",                 # File content with both outputs
+    file_name=f"output_{source_language}_to_{target_language}.txt",  # f-string for filename
     mime="text/plain",                          # File type
     use_container_width=True,                   # Full width button
-    disabled=not bool(st.session_state.decoded_text),  # Disable if no output
+    disabled=not bool(combined_output),         # Disable if no output
 )
 
