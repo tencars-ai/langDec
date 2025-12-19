@@ -1,8 +1,12 @@
-
 import streamlit as st
 
 #import psycopg
 
+from domain.decoder import WordByWordDecoder
+from services.translator import GoogleDeepTranslatorService
+
+_translation_service = GoogleDeepTranslatorService()
+_decoder = WordByWordDecoder(_translation_service)
 
 # -------------------------------------------------
 # 1) Page configuration
@@ -61,9 +65,15 @@ def apply_line_breaks(text: str, max_chars: int) -> str:
 # -------------------------------------------------
 # 3) Decoder hook (replace with your real decoder)
 # -------------------------------------------------
+
 def decode_text(text: str, source_lang: str, target_lang: str) -> str:
-    # Placeholder – plug in your existing decoder here
-    return f"[DECODED {source_lang}->{target_lang}]\n\n{text}"
+    return _decoder.decode(
+        text=text,
+        source_lang=source_lang,
+        target_lang=target_lang,
+        max_line_length=max_line_length,  # comes from your UI config
+    )
+
 
 # -------------------------------------------------
 # 4) Configuration
@@ -87,14 +97,14 @@ with col_left:
     source_label = st.selectbox(
         "Source language",
         list(LANGUAGES.keys()),
-        index=1,
+        index=2,  # Portuguese (pt)
     )
 
 with col_right:
     target_label = st.selectbox(
-        "Target language",
+        "Target language (mother tongue)",
         list(LANGUAGES.keys()),
-        index=0,
+        index=0,  # German (de)
     )
 
 source_language = LANGUAGES[source_label]
