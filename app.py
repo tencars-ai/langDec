@@ -268,30 +268,44 @@ if "translated_text" not in st.session_state:
 
 # Check if the Decode button was clicked
 if decode_clicked:
-    # Perform the decoding
-    # .strip() removes leading/trailing whitespace from input
-    raw_decoded = decode_text(
-        input_text.strip(),
-        source_language,
-        target_language,
-    )
+    try:
+        # Show a spinner while processing
+        with st.spinner('Decoding...'):
+            # Perform the decoding
+            # .strip() removes leading/trailing whitespace from input
+            raw_decoded = decode_text(
+                input_text.strip(),
+                source_language,
+                target_language,
+            )
 
-    # Apply additional line wrapping to the output
-    # Store result in session state so it persists
-    st.session_state.decoded_text = apply_line_breaks(
-        raw_decoded,
-        max_line_length,
-    )
+            # Apply additional line wrapping to the output
+            # Store result in session state so it persists
+            st.session_state.decoded_text = apply_line_breaks(
+                raw_decoded,
+                max_line_length,
+            )
+        st.success('Decoding completed!')
+    except Exception as e:
+        st.error(f'Error during decoding: {str(e)}')
+        st.session_state.decoded_text = ""
 
 # Check if the Translate button was clicked
 if translate_clicked:
-    # Perform the translation
-    # .strip() removes leading/trailing whitespace from input
-    st.session_state.translated_text = translate_text(
-        input_text.strip(),
-        source_language,
-        target_language,
-    )
+    try:
+        # Show a spinner while processing
+        with st.spinner('Translating...'):
+            # Perform the translation
+            # .strip() removes leading/trailing whitespace from input
+            st.session_state.translated_text = translate_text(
+                input_text.strip(),
+                source_language,
+                target_language,
+            )
+        st.success('Translation completed!')
+    except Exception as e:
+        st.error(f'Error during translation: {str(e)}')
+        st.session_state.translated_text = ""
 
 # Display the decoded output in a text area
 # This text area is read-only by default (user can select/copy but not edit)
