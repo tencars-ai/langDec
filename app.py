@@ -325,7 +325,6 @@ st.text_area(
     value=st.session_state.decoded_text,        # Content to display
     height=220,                                 # Height in pixels
     help="Select and copy the text (Ctrl/Cmd + C).",  # Help tooltip
-    key="decoded_output",                       # Unique key for styling
 )
 
 # Display the translated output in a second text area
@@ -334,7 +333,6 @@ st.text_area(
     value=st.session_state.translated_text,     # Content to display
     height=220,                                 # Height in pixels
     help="Select and copy the text (Ctrl/Cmd + C).",  # Help tooltip
-    key="translated_output",                    # Unique key for styling
 )
 
 # Create combined output for download
