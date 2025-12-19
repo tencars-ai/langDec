@@ -318,6 +318,8 @@ if translate_clicked:
 
 # Display the decoded output in a text area
 # This text area is read-only by default (user can select/copy but not edit)
+st.write(f"DEBUG - About to display text with length: {len(st.session_state.decoded_text)}")
+st.write(f"DEBUG - First 200 chars: {st.session_state.decoded_text[:200]}")
 st.text_area(
     "Decoded text (word-by-word)",              # Label
     value=st.session_state.decoded_text,        # Content to display
