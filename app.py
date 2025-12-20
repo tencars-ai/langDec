@@ -7,13 +7,10 @@ import streamlit as st
 # Import our custom classes from other files
 from domain.decoder import WordByWordDecoder
 from domain.translator import Translator
-from services.translation_service import GoogleDeepTranslatorService
+from services.translation_service import get_translation_service
 
-# Create instances that will be used throughout the app
-# _ prefix indicates these are module-level "private" variables
-_translation_service = GoogleDeepTranslatorService()  # Creates the translation service
-_decoder = WordByWordDecoder(_translation_service)    # Creates the decoder with the service
-_translator = Translator(_translation_service)        # Creates the translator with the service
+# Translation service instances will be created dynamically based on user selection
+# This happens in the configuration section below
 
 # -------------------------------------------------
 # 1) Page configuration
@@ -24,10 +21,12 @@ st.set_page_config(page_title="langDec – Decoder", layout="centered")
 # Dictionary to map display names to language codes
 # Keys: what the user sees in the dropdown
 # Values: what we send to the translation API
+# Note: Some services like MyMemory differentiate between pt-PT and pt-BR
 LANGUAGES = {
     "German (de)": "de",
     "English (en)": "en",
-    "Portuguese (pt)": "pt",
+    "Portuguese - Brazil (pt-BR)": "pt-BR",
+    "Portuguese - Portugal (pt-PT)": "pt-PT",
 }
 
 # Apply custom CSS styling to make text areas use monospace font
@@ -196,6 +195,21 @@ with st.expander("Decoder configuration", expanded=True):
         step=5,           # Increment when using +/- buttons
         help="Automatically inserts line breaks to improve readability.",
     )
+    
+    # st.radio creates a radio button group
+    # The return value is the selected option
+    selected_service = st.radio(
+        "Translation Service",
+        options=["Google", "MyMemory", "Linguee", "PONS"],
+        index=0,  # Default to Google
+        help="Choose which translation service to use for decoding and translation.",
+    )
+
+# Create translation service instance based on user selection
+# get_translation_service is a factory function that returns the appropriate service
+_translation_service = get_translation_service(selected_service)
+_decoder = WordByWordDecoder(_translation_service)    # Creates the decoder with the service
+_translator = Translator(_translation_service)        # Creates the translator with the service
 
 # -------------------------------------------------
 # 5) Language selection and input
@@ -210,7 +224,7 @@ with col_left:
     source_label = st.selectbox(
         "Source Language",              # Label above dropdown
         list(LANGUAGES.keys()),         # Options to choose from
-        index=2,                        # Default selection: index 2 = Portuguese
+        index=2,                        # Default selection: index 2 = Portuguese - Brazil
     )
 
 # Place target language selector in right column
