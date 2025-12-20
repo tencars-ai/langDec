@@ -66,48 +66,82 @@ class WordByWordDecoder:
         source_lang: str,
         target_lang: str,
         max_line_length: int,
-    ) -> str:
-        """Main method to decode text word-by-word.
+    ) -> tuple:
+        """Main method to decode text with sentence-based translation and word alignment.
+        
+        New approach:
+        1. Translate entire text for maximum context
+        2. Split both source and translated text into sentences
+        3. Align words within each sentence pair
         
         Args:
-            text: The text to decode (can be multiple words)
+            text: The text to decode (can be multiple sentences)
             source_lang: Language code of input text (e.g., "en")
             target_lang: Language code for translation (e.g., "de")
             max_line_length: Maximum characters per line before breaking
             
         Returns:
-            Formatted string with aligned translations
+            Tuple of (formatted_string, debug_translations_list)
         """
         # Clean up the input: if text is None, use ""
         text = (text or "").strip()
         
-        # Early return: if text is empty, just return empty string
+        # Early return: if text is empty, just return empty string and empty debug list
         if not text:
-            return ""
+            return "", []
 
-        # Process each line separately to preserve line breaks
-        lines = text.split('\n')
-        decoded_lines = []
+        # Debug collection for individual translations
+        debug_translations = []
+
+        # Step 1: Translate the ENTIRE text at once for maximum context
+        translated_text = self.translation_service.translate_text(
+            text, source_lang=source_lang, target_lang=target_lang
+        )
         
-        for line in lines:
-            line = line.strip()
-            # Skip empty lines but preserve them in output
-            if not line:
-                decoded_lines.append("")
-                continue
-                
-            # Step 1: Split line into individual words
-            tokens = self._tokenize(line)
+        # Step 2: Split both texts into sentences (at . or newlines)
+        source_sentences = self._split_into_sentences(text)
+        target_sentences = self._split_into_sentences(translated_text)
+        
+        # Step 3: Process each sentence pair
+        decoded_lines = []
+        for source_sent, target_sent in zip(source_sentences, target_sentences):
+            # Tokenize both sentences
+            source_tokens = self._tokenize(source_sent)
+            target_tokens = self._tokenize(target_sent)
             
-            # Step 2: Translate each word and create TokenPair objects
-            pairs = self._translate_tokens(tokens, source_lang, target_lang)
+            # Align words and create TokenPairs (also collects debug info)
+            pairs, sentence_debug = self._align_sentence_words(
+                source_tokens, target_tokens, source_lang, target_lang
+            )
             
-            # Step 3: Format the pairs into aligned two-line output with line breaks
+            # Collect debug info
+            debug_translations.extend(sentence_debug)
+            
+            # Format the aligned pairs
             decoded_lines.append(self._format_aligned(pairs, max_line_length=max_line_length))
         
-        return "\n".join(decoded_lines)
+        return "\n".join(decoded_lines), debug_translations
 
     # Methods starting with _ are "private" - meant for internal use only
+    def _split_into_sentences(self, text: str) -> List[str]:
+        """Split text into sentences at periods or newlines.
+        
+        Args:
+            text: Input text to split
+            
+        Returns:
+            List of sentences
+            
+        Example:
+            "Hello world. How are you?" → ["Hello world", "How are you"]
+            "Line 1\nLine 2" → ["Line 1", "Line 2"]
+        """
+        import re
+        # Split on period (followed by space or end) or newline
+        sentences = re.split(r'[.\n]+', text)
+        # Remove empty strings and strip whitespace
+        return [s.strip() for s in sentences if s.strip()]
+    
     def _tokenize(self, text: str) -> List[str]:
         """Split text into individual words.
         
@@ -120,9 +154,117 @@ class WordByWordDecoder:
         Example:
             "hello world" → ["hello", "world"]
         """
-        # Simple whitespace tokenization (can be improved later)
+        # Simple whitespace tokenization
         # .split() without arguments splits on any whitespace and removes empty strings
         return text.split()
+
+    def _align_sentence_words(
+        self,
+        source_tokens: List[str],
+        target_tokens: List[str],
+        source_lang: str,
+        target_lang: str,
+    ) -> tuple:
+        """Align words from source and target sentences using improved hybrid approach.
+        
+        Strategy (4-pass approach):
+        1. Translate ALL source words individually
+        2. Search each individual translation in ENTIRE target sentence
+        3. Mark found words as "matched" (source → target mapping)
+        4. Fill remaining gaps with positional alignment
+        
+        This handles different word order and sentence structures much better.
+        
+        Args:
+            source_tokens: Words from source sentence
+            target_tokens: Words from translated target sentence
+            source_lang: Source language code
+            target_lang: Target language code
+            
+        Returns:
+            Tuple of (List of TokenPair objects, debug_info list)
+        """
+        # Debug info collection
+        debug_info = []
+        
+        # Pass 1: Translate all source words individually
+        individual_translations = []
+        for token in source_tokens:
+            try:
+                translated = self.translation_service.translate_word(
+                    token, source_lang=source_lang, target_lang=target_lang
+                )
+                individual_translations.append(translated)
+                # Add to debug
+                debug_info.append({
+                    "source": token,
+                    "translation": translated,
+                    "used": "pending"
+                })
+            except Exception:
+                individual_translations.append(None)
+        
+        # Track which target words have been matched
+        target_matched = [False] * len(target_tokens)
+        # Track which source words have been matched
+        source_matches = [None] * len(source_tokens)  # None or target_index
+        
+        # Pass 2: Search for exact matches in target sentence
+        for i, (source_token, individual_trans) in enumerate(zip(source_tokens, individual_translations)):
+            if individual_trans is None:
+                continue
+                
+            # Search for this translation in ALL target tokens
+            for j, target_token in enumerate(target_tokens):
+                if target_matched[j]:
+                    continue  # Already matched
+                    
+                # Case-insensitive comparison
+                if target_token.lower() == individual_trans.lower():
+                    # Found a match!
+                    source_matches[i] = j
+                    target_matched[j] = True
+                    # Update debug info
+                    debug_info[i]["used"] = "✓ Found in context"
+                    break
+            
+            # If no match found, mark as not used
+            if source_matches[i] is None and individual_trans is not None:
+                debug_info[i]["used"] = "✗ Not in context"
+        
+        # Pass 3: Create TokenPairs from confirmed matches
+        pairs: List[TokenPair] = []
+        
+        for i, source_token in enumerate(source_tokens):
+            if source_matches[i] is not None:
+                # We have a confirmed match
+                target_token = target_tokens[source_matches[i]]
+            else:
+                # No match found - use positional alignment if possible
+                if i < len(target_tokens) and not target_matched[i]:
+                    target_token = target_tokens[i]
+                    target_matched[i] = True
+                else:
+                    # Find first unmatched target word
+                    target_token = None
+                    for j, matched in enumerate(target_matched):
+                        if not matched:
+                            target_token = target_tokens[j]
+                            target_matched[j] = True
+                            break
+                    
+                    if target_token is None:
+                        target_token = "---"
+            
+            pairs.append(TokenPair(source_token=source_token, target_token=target_token))
+        
+        # Pass 4: Add remaining unmatched target words
+        for j, (target_token, matched) in enumerate(zip(target_tokens, target_matched)):
+            if not matched:
+                # This target word wasn't aligned to any source word
+                pairs.append(TokenPair(source_token="---", target_token=target_token))
+        
+        return pairs, debug_info
 
     def _translate_tokens(
         self,

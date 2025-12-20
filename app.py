@@ -140,7 +140,7 @@ def apply_line_breaks(text: str, max_chars: int) -> str:
 # 3) Decoder function - connects UI to our decoder
 # -------------------------------------------------
 
-def decode_text(text: str, source_lang: str, target_lang: str) -> str:
+def decode_text(text: str, source_lang: str, target_lang: str) -> tuple:
     """Wrapper function to call our decoder with the right parameters.
     
     Args:
@@ -149,7 +149,7 @@ def decode_text(text: str, source_lang: str, target_lang: str) -> str:
         target_lang: Target language code
         
     Returns:
-        Decoded and formatted text
+        Tuple of (decoded_text, debug_translations)
     """
     # Call the decoder's decode method
     # max_line_length comes from the UI config below (defined later in the code)
@@ -237,82 +237,55 @@ input_text = st.text_area(
 if source_language == target_language:
     st.warning("Source and target language are identical.")
 
-# Create two buttons side by side
-# st.columns creates columns for side-by-side layout
-btn_col1, btn_col2 = st.columns(2)
-
+# Single button for both operations
 # st.button creates a clickable button
 # Returns True when clicked, False otherwise
-with btn_col1:
-    decode_clicked = st.button(
-        "Decode",                          # Button text
-        type="primary",                    # Makes button blue/prominent
-        use_container_width=True,          # Makes button full width
-    )
-
-with btn_col2:
-    translate_clicked = st.button(
-        "Translate",                       # Button text
-        type="secondary",                  # Secondary button style
-        use_container_width=True,          # Makes button full width
-    )
+process_clicked = st.button(
+    "Translate & Decode",              # Button text
+    type="primary",                    # Makes button blue/prominent
+    use_container_width=True,          # Makes button full width
+)
 
 # -------------------------------------------------
 # 6) Output section
 # -------------------------------------------------
 # st.session_state is like a dictionary that persists between page reruns
 # It allows us to store data that survives when user interacts with the page
-# Check if 'decoded_text' and 'translated_text' exist in session state, if not, create them
+# Check if session state variables exist, if not, create them
 if "decoded_text" not in st.session_state:
     st.session_state.decoded_text = ""  # Initialize with empty string
 if "translated_text" not in st.session_state:
     st.session_state.translated_text = ""  # Initialize with empty string
+if "debug_translations" not in st.session_state:
+    st.session_state.debug_translations = []  # For 1:1 word translations
 
-# Check if the Decode button was clicked
-if decode_clicked:
+# Check if the Translate & Decode button was clicked
+if process_clicked:
     try:
         # Show a spinner while processing
-        with st.spinner('Decoding...'):
-            # Perform the decoding
-            # .strip() removes leading/trailing whitespace from input
-            # The decoder already handles line breaks internally
-            st.session_state.decoded_text = decode_text(
-                input_text.strip(),
-                source_language,
-                target_language,
-            )
-        st.success('Decoding completed!')
-    except Exception as e:
-        st.error(f'Error during decoding: {str(e)}')
-        st.session_state.decoded_text = ""
-
-# Check if the Translate button was clicked
-if translate_clicked:
-    try:
-        # Show a spinner while processing
-        with st.spinner('Translating...'):
-            # Perform the translation
-            # .strip() removes leading/trailing whitespace from input
+        with st.spinner('Translating and decoding...'):
+            # First: Natural translation
             st.session_state.translated_text = translate_text(
                 input_text.strip(),
                 source_language,
                 target_language,
             )
-        st.success('Translation completed!')
+            
+            # Second: Decode (word alignment)
+            # This will also populate debug info
+            st.session_state.decoded_text, st.session_state.debug_translations = decode_text(
+                input_text.strip(),
+                source_language,
+                target_language,
+            )
+        st.success('Translation and decoding completed!')
     except Exception as e:
-        st.error(f'Error during translation: {str(e)}')
+        st.error(f'Error during processing: {str(e)}')
+        st.session_state.decoded_text = ""
         st.session_state.translated_text = ""
+        st.session_state.debug_translations = []
 
-# Display the decoded output in a text area
-# This text area is read-only by default (user can select/copy but not edit)
-st.text_area(
-    "Decoded text (word-by-word)",              # Label
-    value=st.session_state.decoded_text,        # Content to display
-    height=220,                                 # Height in pixels
-    help="Select and copy the text (Ctrl/Cmd + C).",  # Help tooltip
-)
-
-# Display the translated output in a second text area
+# Display the translated output first
 st.text_area(
     "Translated text (natural translation)",    # Label
     value=st.session_state.translated_text,     # Content to display
@@ -320,14 +293,38 @@ st.text_area(
     help="Select and copy the text (Ctrl/Cmd + C).",  # Help tooltip
 )
 
+# Debug area: Show 1:1 word translations
+with st.expander("Debug: Individual word translations", expanded=False):
+    if st.session_state.debug_translations:
+        st.markdown("**1:1 Word Translations (without context)**")
+        # Create a table
+        debug_data = []
+        for item in st.session_state.debug_translations:
+            debug_data.append({
+                "Source Word": item["source"],
+                "1:1 Translation": item["translation"],
+                "Used in Decoding": item.get("used", "?")
+            })
+        st.table(debug_data)
+    else:
+        st.info("Click 'Translate & Decode' to see individual word translations.")
+
+# Display the decoded output
+st.text_area(
+    "Decoded text (word-by-word alignment)",    # Label
+    value=st.session_state.decoded_text,        # Content to display
+    height=220,                                 # Height in pixels
+    help="Select and copy the text (Ctrl/Cmd + C).",  # Help tooltip
+)
+
 # Create combined output for download
 combined_output = ""
-if st.session_state.decoded_text:
-    combined_output += "=== DECODED (Word-by-Word) ===\n\n"
-    combined_output += st.session_state.decoded_text + "\n\n"
 if st.session_state.translated_text:
     combined_output += "=== TRANSLATED (Natural) ===\n\n"
-    combined_output += st.session_state.translated_text + "\n"
+    combined_output += st.session_state.translated_text + "\n\n"
+if st.session_state.decoded_text:
+    combined_output += "=== DECODED (Word-by-Word) ===\n\n"
+    combined_output += st.session_state.decoded_text + "\n"
 
 # Download button to save both outputs as a text file
 st.download_button(
