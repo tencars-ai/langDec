@@ -7,13 +7,22 @@ import streamlit as st
 # Import our custom classes from other files
 from domain.decoder import WordByWordDecoder
 from domain.translator import Translator
-from services.translation_service import GoogleDeepTranslatorService
+from services.translation_service import (
+    TranslationService,
+    GoogleDeepTranslatorService,
+    ArgosTranslateService,
+)
 
-# Create instances that will be used throughout the app
-# _ prefix indicates these are module-level "private" variables
-_translation_service = GoogleDeepTranslatorService()  # Creates the translation service
-_decoder = WordByWordDecoder(_translation_service)    # Creates the decoder with the service
-_translator = Translator(_translation_service)        # Creates the translator with the service
+# Dictionary of available translation services
+# Makes it easy to add new services - just add them here!
+AVAILABLE_SERVICES = {
+    "Google Translate": GoogleDeepTranslatorService(),
+    "Argos Translate": ArgosTranslateService(),
+}
+
+# These will be initialized when user selects a service
+_decoder = None
+_translator = None
 
 # -------------------------------------------------
 # 1) Page configuration
@@ -186,6 +195,22 @@ def translate_text(text: str, source_lang: str, target_lang: str) -> str:
 # st.expander creates a collapsible section
 # expanded=True means it's open by default
 with st.expander("Decoder configuration", expanded=True):
+    # Radio button for translation service selection
+    selected_service_name = st.radio(
+        "Translation Service",
+        options=list(AVAILABLE_SERVICES.keys()),
+        index=0,  # Default: first service (Google Translate)
+        help="Choose which translation service to use for decoding and translation.",
+        horizontal=True,  # Display options horizontally
+    )
+    
+    # Get the selected service instance
+    _translation_service = AVAILABLE_SERVICES[selected_service_name]
+    
+    # Initialize decoder and translator with selected service
+    _decoder = WordByWordDecoder(_translation_service)
+    _translator = Translator(_translation_service)
+    
     # st.number_input creates a number input field
     # The return value is stored in max_line_length
     max_line_length = st.number_input(
