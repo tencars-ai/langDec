@@ -12,6 +12,11 @@ from services.translation_service import (
     GoogleDeepTranslatorService,
     ArgosTranslateService,
 )
+from services.ocr_service import TesseractOCRService, EasyOCRService
+
+# For image processing
+from PIL import Image
+import io
 
 # Dictionary of available translation services
 # Makes it easy to add new services - just add them here!
@@ -19,6 +24,9 @@ AVAILABLE_SERVICES = {
     "Google Translate": GoogleDeepTranslatorService(),
     "Argos Translate": ArgosTranslateService(),
 }
+
+# OCR Service - Use EasyOCR as default (works on Streamlit Cloud without additional installation)
+_ocr_service = EasyOCRService()
 
 # These will be initialized when user selects a service
 _decoder = None
@@ -251,11 +259,69 @@ with col_right:
 source_language = LANGUAGES[source_label]
 target_language = LANGUAGES[target_label]
 
+# Initialize session state for input text if not exists
+if "input_text" not in st.session_state:
+    st.session_state.input_text = ""
+
+# -------------------------------------------------
+# OCR Section - Image Upload and Camera
+# -------------------------------------------------
+st.markdown("### 📷 OCR - Text from Image")
+
+# Create tabs for different input methods
+ocr_tab1, ocr_tab2 = st.tabs(["Upload Image", "Take Photo"])
+
+with ocr_tab1:
+    uploaded_file = st.file_uploader(
+        "Upload an image",
+        type=['png', 'jpg', 'jpeg', 'tiff', 'bmp'],
+        help="Upload an image containing text to extract",
+    )
+    
+with ocr_tab2:
+    camera_photo = st.camera_input(
+        "Take a photo",
+        help="Use your camera to capture text (works on mobile devices)",
+    )
+
+# Process OCR if image is available
+image_source = uploaded_file or camera_photo
+
+if image_source:
+    # Display the image
+    image = Image.open(image_source)
+    st.image(image, caption="Image to process", use_container_width=True)
+    
+    # OCR Button
+    if st.button("🔍 Extract Text (OCR)", type="secondary", use_container_width=True):
+        with st.spinner('Extracting text from image...'):
+            # Get language code for OCR
+            ocr_lang = EasyOCRService.get_language_code(source_label)
+            
+            # Perform OCR
+            extracted_text = _ocr_service.extract_text(image, lang=ocr_lang)
+            
+            # Insert at current position (append to existing text)
+            if st.session_state.input_text:
+                # Add space between existing and new text if needed
+                separator = "\n" if st.session_state.input_text.strip() else ""
+                st.session_state.input_text += separator + extracted_text
+            else:
+                st.session_state.input_text = extracted_text
+            
+            st.success(f'Text extracted! ({len(extracted_text)} characters)')
+            st.rerun()  # Refresh to show new text in input field
+
+st.markdown("---")  # Separator line
+
 # st.text_area creates a multi-line text input field
+# Now using session state to allow OCR text insertion
+# key="input_text" directly binds to st.session_state.input_text
 input_text = st.text_area(
-    "Input text",                      # Label
-    height=220,                        # Height in pixels
-    placeholder="Paste your text here…",  # Hint text when empty
+    "Input text",
+    height=220,
+    placeholder="Paste your text here or use OCR above…",
+    key="input_text",  # This automatically syncs with st.session_state.input_text
 )
 
 # Show warning if user selected same language for source and target

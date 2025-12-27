@@ -1,3 +1,6 @@
 streamlit
 psycopg[binary]
 deep-translator
+easyocr
+pillow
+numpy
