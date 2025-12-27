@@ -17,6 +17,7 @@ from services.ocr_service import TesseractOCRService, EasyOCRService
 # For image processing
 from PIL import Image
 import io
+import fitz  # PyMuPDF for PDF handling
 
 # Dictionary of available translation services
 # Makes it easy to add new services - just add them here!
@@ -53,6 +54,20 @@ LANGUAGES = {
 st.markdown(
     """
     <style>
+      /* Smaller title and reduced margins */
+      h1 {
+        font-size: 1.8rem !important;
+        margin-top: 0.5rem !important;
+        margin-bottom: 0.3rem !important;
+      }
+      
+      /* Smaller section headings in expander */
+      .stExpander h4 {
+        font-size: 0.95rem !important;
+        margin-top: 0.5rem !important;
+        margin-bottom: 0.3rem !important;
+      }
+      
       textarea {
         font-family: "Courier New", Courier, monospace !important;
         font-size: 14px !important;
@@ -109,7 +124,6 @@ st.markdown(
 
 # Display the main title and subtitle
 st.title("Language Decoder")
-st.caption("Paste text → select languages → configure → decode")
 
 # -------------------------------------------------
 # 2) Helper function: line wrapping
@@ -198,11 +212,240 @@ def translate_text(text: str, source_lang: str, target_lang: str) -> str:
 
 
 # -------------------------------------------------
-# 4) Configuration section
+# 4) Language selection and input
+# -------------------------------------------------
+# st.columns(2) creates two columns of equal width
+# We can place different elements in each column
+col_left, col_right = st.columns(2)
+
+# Place source language selector in left column
+with col_left:
+    st.markdown("**Source Language**")
+    # st.selectbox creates a dropdown menu
+    source_label = st.selectbox(
+        "Source Language",              # Label above dropdown
+        list(LANGUAGES.keys()),         # Options to choose from
+        index=2,                        # Default selection: index 2 = Portuguese
+        label_visibility="collapsed",   # Hide label since we show it with markdown
+    )
+
+# Place target language selector in right column
+with col_right:
+    st.markdown("**Target Language (Mother Tongue)**")
+    target_label = st.selectbox(
+        "Target Language (Mother Tongue)",
+        list(LANGUAGES.keys()),
+        index=0,  # Default selection: index 0 = German
+        label_visibility="collapsed",   # Hide label since we show it with markdown
+    )
+
+# Convert display labels to language codes
+# Example: "German (de)" → "de"
+source_language = LANGUAGES[source_label]
+target_language = LANGUAGES[target_label]
+
+# Initialize session state for input text if not exists
+if "input_text" not in st.session_state:
+    st.session_state.input_text = ""
+
+# Initialize session state for OCR widgets visibility
+if "show_camera" not in st.session_state:
+    st.session_state.show_camera = False
+if "show_browse" not in st.session_state:
+    st.session_state.show_browse = False
+
+# Initialize default values for configuration parameters
+# These can be overridden by the Configuration expander below
+ocr_line_height_threshold = 30  # Default value
+max_line_length = 65  # Default value
+
+# -------------------------------------------------
+# Input Text Section
+# -------------------------------------------------
+st.markdown("**Input Text**")
+
+# -------------------------------------------------
+# OCR Section - Image Upload and Camera
+# -------------------------------------------------
+# Create two columns for OCR buttons
+ocr_col1, ocr_col2 = st.columns(2)
+
+with ocr_col1:
+    if st.button(
+        "📷 Take Photo (OCR)",
+        use_container_width=True,
+        help="Use your camera to capture text",
+    ):
+        # Toggle camera visibility
+        st.session_state.show_camera = not st.session_state.show_camera
+        st.session_state.show_browse = False  # Hide browse when camera is shown
+
+with ocr_col2:
+    if st.button(
+        "📁 Browse Files (OCR)",
+        use_container_width=True,
+        help="Upload an image file",
+    ):
+        # Toggle browse visibility
+        st.session_state.show_browse = not st.session_state.show_browse
+        st.session_state.show_camera = False  # Hide camera when browse is shown
+
+# Show camera input if enabled (appears above text area)
+if st.session_state.show_camera:
+    camera_photo = st.camera_input(
+        "Take a photo",
+        help="Capture an image with your camera",
+    )
+    if camera_photo:
+        image = Image.open(camera_photo)
+        st.image(image, caption="Image to process", use_container_width=True)
+        
+        if st.button("🔍 Extract Text (OCR)", type="secondary", use_container_width=True, key="ocr_camera"):
+            with st.spinner('Extracting text from image...'):
+                ocr_lang = EasyOCRService.get_language_code(source_label)
+                extracted_text = _ocr_service.extract_text(
+                    image, 
+                    lang=ocr_lang, 
+                    line_height_threshold=ocr_line_height_threshold
+                )
+                
+                if st.session_state.input_text:
+                    separator = "\n" if st.session_state.input_text.strip() else ""
+                    st.session_state.input_text += separator + extracted_text
+                else:
+                    st.session_state.input_text = extracted_text
+                
+                st.success(f'Text extracted! ({len(extracted_text)} characters)')
+                st.session_state.show_camera = False
+                st.rerun()
+    st.markdown("---")  # Separator line at the bottom
+
+# Show file uploader if enabled (appears above text area)
+if st.session_state.show_browse:
+    uploaded_file = st.file_uploader(
+        "Browse and select an image file or PDF",
+        type=['png', 'jpg', 'jpeg', 'tiff', 'bmp', 'pdf'],
+        help="Select an image file or PDF from your device (also supports drag & drop)",
+    )
+    if uploaded_file:
+        # Check if it's a PDF
+        if uploaded_file.name.lower().endswith('.pdf'):
+            # Show PDF preview without processing
+            pdf_bytes = uploaded_file.read()
+            pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
+            page_count = len(pdf_document)
+            
+            # Preview first page only
+            page = pdf_document[0]
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+            img_data = pix.tobytes("png")
+            preview_image = Image.open(io.BytesIO(img_data))
+            st.image(preview_image, caption=f"PDF Preview - Page 1 of {page_count}", use_container_width=True)
+            pdf_document.close()
+            
+            if st.button("🔍 Extract Text from PDF (OCR)", type="secondary", use_container_width=True, key="ocr_pdf"):
+                # Now do the actual OCR processing
+                pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
+                all_extracted_text = []
+                
+                for page_num in range(page_count):
+                    page = pdf_document[page_num]
+                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                    img_data = pix.tobytes("png")
+                    image = Image.open(io.BytesIO(img_data))
+                    
+                    with st.spinner(f'Extracting text from page {page_num + 1} of {page_count}...'):
+                        ocr_lang = EasyOCRService.get_language_code(source_label)
+                        extracted_text = _ocr_service.extract_text(
+                            image, 
+                            lang=ocr_lang, 
+                            line_height_threshold=ocr_line_height_threshold
+                        )
+                        all_extracted_text.append(extracted_text)
+                
+                pdf_document.close()
+                combined_text = "\n\n".join(all_extracted_text)
+                
+                if st.session_state.input_text:
+                    separator = "\n" if st.session_state.input_text.strip() else ""
+                    st.session_state.input_text += separator + combined_text
+                else:
+                    st.session_state.input_text = combined_text
+                
+                st.success(f'Text extracted from {page_count} pages! ({len(combined_text)} characters)')
+                st.session_state.show_browse = False
+                st.rerun()
+        else:
+            # Regular image file
+            image = Image.open(uploaded_file)
+            st.image(image, caption="Image to process", use_container_width=True)
+            
+            if st.button("🔍 Extract Text (OCR)", type="secondary", use_container_width=True, key="ocr_browse"):
+                with st.spinner('Extracting text from image...'):
+                    ocr_lang = EasyOCRService.get_language_code(source_label)
+                    extracted_text = _ocr_service.extract_text(
+                        image, 
+                        lang=ocr_lang, 
+                        line_height_threshold=ocr_line_height_threshold
+                    )
+                    
+                    if st.session_state.input_text:
+                        separator = "\n" if st.session_state.input_text.strip() else ""
+                        st.session_state.input_text += separator + extracted_text
+                    else:
+                        st.session_state.input_text = extracted_text
+                    
+                    st.success(f'Text extracted! ({len(extracted_text)} characters)')
+                    st.session_state.show_browse = False
+                    st.rerun()
+    st.markdown("---")  # Separator line at the bottom
+
+# Input text area below the OCR buttons and expandable areas
+input_text = st.text_area(
+    "Input Text",
+    height=220,
+    placeholder="Paste your text here or use OCR above…",
+    key="input_text",  # This automatically syncs with st.session_state.input_text
+    label_visibility="collapsed",  # Hide the label since we show it as markdown above
+)
+
+# Show warning if user selected same language for source and target
+if source_language == target_language:
+    st.warning("Source and target language are identical.")
+
+# Create three buttons side by side
+# st.columns creates columns for side-by-side layout
+btn_col1, btn_col2, btn_col3 = st.columns(3)
+
+# st.button creates a clickable button
+# Returns True when clicked, False otherwise
+with btn_col1:
+    decode_clicked = st.button(
+        "Decode",                          # Button text
+        type="primary",                    # Makes button green/prominent
+        use_container_width=True,          # Makes button full width
+    )
+
+with btn_col2:
+    translate_clicked = st.button(
+        "Translate",                       # Button text
+        type="secondary",                  # Blue button style
+        use_container_width=True,          # Makes button full width
+    )
+
+with btn_col3:
+    decode_translate_clicked = st.button(
+        "Decode & Translate",              # Button text
+        use_container_width=True,          # Makes button full width
+        help="Perform both decode and translate in one step",
+    )
+
+# -------------------------------------------------
+# Configuration section (moved below buttons)
 # -------------------------------------------------
 # st.expander creates a collapsible section
-# expanded=True means it's open by default
-with st.expander("Decoder configuration", expanded=True):
+# expanded=False means it's collapsed by default
+with st.expander("Configuration", expanded=False):
     # Radio button for translation service selection
     selected_service_name = st.radio(
         "Translation Service",
@@ -219,6 +462,18 @@ with st.expander("Decoder configuration", expanded=True):
     _decoder = WordByWordDecoder(_translation_service)
     _translator = Translator(_translation_service)
     
+    st.markdown("#### OCR")
+    # OCR line height threshold parameter
+    ocr_line_height_threshold = st.number_input(
+        "Line height threshold (pixels)",
+        min_value=10,
+        max_value=100,
+        value=30,
+        step=5,
+        help="Vertical distance threshold to detect line breaks. Higher = fewer line breaks, lower = more line breaks.",
+    )
+    
+    st.markdown("#### Decoder Output")
     # st.number_input creates a number input field
     # The return value is stored in max_line_length
     max_line_length = st.number_input(
@@ -228,124 +483,6 @@ with st.expander("Decoder configuration", expanded=True):
         value=65,         # Default value when page loads
         step=5,           # Increment when using +/- buttons
         help="Automatically inserts line breaks to improve readability.",
-    )
-
-# -------------------------------------------------
-# 5) Language selection and input
-# -------------------------------------------------
-# st.columns(2) creates two columns of equal width
-# We can place different elements in each column
-col_left, col_right = st.columns(2)
-
-# Place source language selector in left column
-with col_left:
-    # st.selectbox creates a dropdown menu
-    source_label = st.selectbox(
-        "Source Language",              # Label above dropdown
-        list(LANGUAGES.keys()),         # Options to choose from
-        index=2,                        # Default selection: index 2 = Portuguese
-    )
-
-# Place target language selector in right column
-with col_right:
-    target_label = st.selectbox(
-        "Target Language (Mother Tongue)",
-        list(LANGUAGES.keys()),
-        index=0,  # Default selection: index 0 = German
-    )
-
-# Convert display labels to language codes
-# Example: "German (de)" → "de"
-source_language = LANGUAGES[source_label]
-target_language = LANGUAGES[target_label]
-
-# Initialize session state for input text if not exists
-if "input_text" not in st.session_state:
-    st.session_state.input_text = ""
-
-# -------------------------------------------------
-# OCR Section - Image Upload and Camera
-# -------------------------------------------------
-st.markdown("### 📷 OCR - Text from Image")
-
-# Create tabs for different input methods
-ocr_tab1, ocr_tab2 = st.tabs(["Upload Image", "Take Photo"])
-
-with ocr_tab1:
-    uploaded_file = st.file_uploader(
-        "Upload an image",
-        type=['png', 'jpg', 'jpeg', 'tiff', 'bmp'],
-        help="Upload an image containing text to extract",
-    )
-    
-with ocr_tab2:
-    camera_photo = st.camera_input(
-        "Take a photo",
-        help="Use your camera to capture text (works on mobile devices)",
-    )
-
-# Process OCR if image is available
-image_source = uploaded_file or camera_photo
-
-if image_source:
-    # Display the image
-    image = Image.open(image_source)
-    st.image(image, caption="Image to process", use_container_width=True)
-    
-    # OCR Button
-    if st.button("🔍 Extract Text (OCR)", type="secondary", use_container_width=True):
-        with st.spinner('Extracting text from image...'):
-            # Get language code for OCR
-            ocr_lang = EasyOCRService.get_language_code(source_label)
-            
-            # Perform OCR
-            extracted_text = _ocr_service.extract_text(image, lang=ocr_lang)
-            
-            # Insert at current position (append to existing text)
-            if st.session_state.input_text:
-                # Add space between existing and new text if needed
-                separator = "\n" if st.session_state.input_text.strip() else ""
-                st.session_state.input_text += separator + extracted_text
-            else:
-                st.session_state.input_text = extracted_text
-            
-            st.success(f'Text extracted! ({len(extracted_text)} characters)')
-            st.rerun()  # Refresh to show new text in input field
-
-st.markdown("---")  # Separator line
-
-# st.text_area creates a multi-line text input field
-# Now using session state to allow OCR text insertion
-# key="input_text" directly binds to st.session_state.input_text
-input_text = st.text_area(
-    "Input text",
-    height=220,
-    placeholder="Paste your text here or use OCR above…",
-    key="input_text",  # This automatically syncs with st.session_state.input_text
-)
-
-# Show warning if user selected same language for source and target
-if source_language == target_language:
-    st.warning("Source and target language are identical.")
-
-# Create two buttons side by side
-# st.columns creates columns for side-by-side layout
-btn_col1, btn_col2 = st.columns(2)
-
-# st.button creates a clickable button
-# Returns True when clicked, False otherwise
-with btn_col1:
-    decode_clicked = st.button(
-        "Decode",                          # Button text
-        type="primary",                    # Makes button blue/prominent
-        use_container_width=True,          # Makes button full width
-    )
-
-with btn_col2:
-    translate_clicked = st.button(
-        "Translate",                       # Button text
-        type="secondary",                  # Secondary button style
-        use_container_width=True,          # Makes button full width
     )
 
 # -------------------------------------------------
@@ -392,6 +529,29 @@ if translate_clicked:
         st.success('Translation completed!')
     except Exception as e:
         st.error(f'Error during translation: {str(e)}')
+        st.session_state.translated_text = ""
+
+# Check if the Decode & Translate button was clicked
+if decode_translate_clicked:
+    try:
+        # Show a spinner while processing
+        with st.spinner('Decoding and translating...'):
+            # Perform decoding first
+            st.session_state.decoded_text = decode_text(
+                input_text.strip(),
+                source_language,
+                target_language,
+            )
+            # Then perform translation
+            st.session_state.translated_text = translate_text(
+                input_text.strip(),
+                source_language,
+                target_language,
+            )
+        st.success('Decoding and translation completed!')
+    except Exception as e:
+        st.error(f'Error during decoding/translation: {str(e)}')
+        st.session_state.decoded_text = ""
         st.session_state.translated_text = ""
 
 # Display the decoded output in a text area

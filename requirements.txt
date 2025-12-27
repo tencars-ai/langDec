@@ -4,3 +4,4 @@ deep-translator
 easyocr
 pillow
 numpy
+PyMuPDF
