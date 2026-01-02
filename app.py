@@ -12,6 +12,7 @@ from services.translation_service import (
     GoogleDeepTranslatorService,
     ArgosTranslateService,
 )
+from services.dictcc_translation_service import DictCcTranslationService
 from services.ocr_service import TesseractOCRService, EasyOCRService
 
 # For image processing
@@ -24,6 +25,7 @@ import fitz  # PyMuPDF for PDF handling
 AVAILABLE_SERVICES = {
     "Google Translate": GoogleDeepTranslatorService(),
     "Argos Translate": ArgosTranslateService(),
+    "dict.cc Dictionary": DictCcTranslationService(),
 }
 
 # OCR Service - Use EasyOCR as default (works on Streamlit Cloud without additional installation)
