@@ -1,7 +1,15 @@
 streamlit
 psycopg[binary]
+psycopg-pool
 deep-translator
+argostranslate
 easyocr
 pillow
 numpy
 PyMuPDF
+streamlit-authenticator
+openai
+anthropic
+gtts
+bcrypt
+cryptography

@@ -6,8 +6,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from typing import Optional, List, Dict
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import psycopg
+from psycopg.rows import dict_row
 
 
 @dataclass
@@ -60,11 +60,11 @@ class DictCcTranslationService:
     target_language: str = 'de'
     
     def __post_init__(self):
-        """Initialize database connection string from environment if not provided."""
+        """Resolve DB connection string from environment if not provided.
+        Does NOT connect eagerly — connection is opened lazily in translate_word().
+        """
         if self.db_connection_string is None:
             self.db_connection_string = os.getenv('DATABASE_URL')
-            if self.db_connection_string is None:
-                raise ValueError("DATABASE_URL environment variable not set")
     
     @property
     def name(self) -> str:
@@ -72,8 +72,10 @@ class DictCcTranslationService:
         return "dict.cc Dictionary"
     
     def _get_connection(self):
-        """Get a database connection."""
-        return psycopg2.connect(self.db_connection_string)
+        """Get a database connection (psycopg v3)."""
+        if not self.db_connection_string:
+            raise RuntimeError("DATABASE_URL is not set — dict.cc service unavailable.")
+        return psycopg.connect(self.db_connection_string, row_factory=dict_row)
     
     def translate_word(
         self, 
@@ -93,7 +95,10 @@ class DictCcTranslationService:
         Returns:
             Translated word as string, or original word if no translation found
         """
-        translations = self.get_translations(word, source_lang, target_lang, limit=1)
+        try:
+            translations = self.get_translations(word, source_lang, target_lang, limit=1)
+        except RuntimeError:
+            return word  # DB not available
         if translations:
             return translations[0].word_target
         return word  # Return original word if no translation found
@@ -139,7 +144,7 @@ class DictCcTranslationService:
         
         conn = self._get_connection()
         try:
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor = conn.cursor()
             
             # Search for exact match first, then partial matches
             query = """
@@ -192,7 +197,7 @@ class DictCcTranslationService:
         
         conn = self._get_connection()
         try:
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor = conn.cursor()
             
             # Forward search (source -> target)
             query_forward = """
@@ -277,7 +282,7 @@ class DictCcTranslationService:
         
         conn = self._get_connection()
         try:
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor = conn.cursor()
             
             query = """
                 SELECT 
