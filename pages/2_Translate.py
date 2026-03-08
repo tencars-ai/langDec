@@ -4,8 +4,8 @@ Translate page – natural/contextual translation only.
 import streamlit as st
 
 from utils.auth_ui import render_sidebar
+from utils.services_ui import get_translate_service
 from domain.translator import Translator
-from services.translation_service import GoogleDeepTranslatorService, ArgosTranslateService
 
 st.set_page_config(page_title="langDec – Translate", layout="centered")
 
@@ -20,14 +20,6 @@ LANGUAGES = {
     "English (en)": "en",
     "Portuguese (pt)": "pt",
 }
-
-AVAILABLE_SERVICES = {
-    "Google Translate": GoogleDeepTranslatorService(),
-    "Argos Translate": ArgosTranslateService(),
-}
-_llm = st.session_state.get("llm_service")
-if _llm:
-    AVAILABLE_SERVICES[_llm.name] = _llm
 
 st.markdown(
     """
@@ -91,11 +83,7 @@ with btn_col2:
         st.session_state.transfer_target_label = target_label
         st.switch_page("pages/1_Decode.py")
 
-# --- Configuration ---
-with st.expander("Configuration", expanded=False):
-    selected_service_name = st.radio("Translation Service", options=list(AVAILABLE_SERVICES.keys()), index=0, horizontal=True)
-    _translation_service = AVAILABLE_SERVICES[selected_service_name]
-    _translator = Translator(_translation_service)
+_translator = Translator(get_translate_service())
 
 # --- Translate logic ---
 if translate_clicked:

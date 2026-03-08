@@ -67,6 +67,8 @@ CREATE TABLE IF NOT EXISTS user_dictionary (
     lang_source VARCHAR(10) NOT NULL,
     lang_target VARCHAR(10) NOT NULL,
     word_class VARCHAR(50),                 -- noun, verb, adj, adv, ...
+    word_target_decoded VARCHAR(255),       -- literal/decoded translation (Birkenbihl)
+    explanation TEXT,                       -- notes, grammar hints, context
     example_sentence TEXT,
     source_text_id UUID REFERENCES texts(id) ON DELETE SET NULL,
     first_seen TIMESTAMP NOT NULL DEFAULT NOW(),

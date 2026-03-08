@@ -68,11 +68,15 @@ else:
             st.session_state.trainer_revealed = True
             st.rerun()
     else:
-        st.markdown(f"**{card['word_target']}**")
+        st.markdown(f"**Natural:** {card['word_target']}")
+        if card.get("word_target_decoded"):
+            st.markdown(f"**Decoded:** {card['word_target_decoded']}")
         if card.get("word_class"):
-            st.caption(f"({card['word_class']})")
+            st.caption(f"Word class: {card['word_class']}")
         if card.get("example_sentence"):
             st.caption(f"Example: {card['example_sentence']}")
+        if card.get("explanation"):
+            st.caption(f"Note: {card['explanation']}")
 
         st.markdown("---")
         c1, c2 = st.columns(2)

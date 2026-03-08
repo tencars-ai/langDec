@@ -34,7 +34,7 @@ class FlashcardBox:
             """
             SELECT vc.id, vc.box_number, vc.last_reviewed, vc.next_review,
                    ud.word_source, ud.word_target, ud.lang_source, ud.lang_target,
-                   ud.word_class, ud.example_sentence
+                   ud.word_class, ud.word_target_decoded, ud.example_sentence, ud.explanation
             FROM vocab_cards vc
             JOIN user_dictionary ud ON ud.id = vc.dictionary_entry_id
             WHERE vc.user_id = %s

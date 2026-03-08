@@ -52,10 +52,33 @@
 
 ---
 
+### To-be-checked later
+-[ ] Datenmodell gg. anpassen. Pro Trabelle sprechende ID. email als unique identifier und mandatory.
+-[ ] Spellcorrection ausschalen oder entsprechen der sprache durchfüreh (rote kringellinien)
+-[ ] translator und decoder in 2 verschiedene menüpunkte unterteilen
+-[ ] wenn ich ausgeloggt bin bleibt die aktuelle seite ohne login button
+-[ ] keine Rückmeldung wenn Folder angelegt wurde, und sieht man irgendwo die folder?
+-[ ] decoder algorithmus ggf. anpassen, dass der ganze text und nicht einzelne wörter vergleichen werden.
+-[ ] abfangen wenn der Text leer ist, nicht sagen es sei komplett
+-[ ] text und md files erlauben
+-[ ] beim speichern solle man auch den Folder wählen können
+-[ ] erklärungen, naming, vision, help editieren und birkenbihl nicht zu prominent platzieren. all in one, from zero to hero, build your own Wortschatz.
+
 ## Remaining / Future
 
+### Near-term
 - [ ] CSV import/export for vocabulary
 - [ ] Clickable word-by-word output (single-word lookup)
 - [ ] Playlist management UI (tables in DB are ready)
 - [ ] Streamlit Cloud deployment with Neon (neon.tech) secrets configured
-- [ ] Variant 2: FastAPI + Reflex/React (long-term)
+
+### Vocabulary card extensions (planned)
+- [ ] Link similar words (similar meaning, similar sounding)
+- [ ] Link antonyms and synonyms
+- [ ] Verb conjugation tables: store and practice tenses per verb card
+- [ ] DB: `vocab_relations` table (word_id, related_word_id, relation_type)
+- [ ] DB: `verb_conjugations` table (dictionary_entry_id, tense, person, form)
+- [ ] UI: conjugation view in Dictionary and Vocab Trainer
+
+### Long-term
+- [ ] Variant 2: FastAPI + Reflex/React

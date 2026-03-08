@@ -12,6 +12,7 @@ st.set_page_config(page_title="langDec", layout="centered")
 # Navigation definition (only shown when logged in)
 # -------------------------------------------------------
 PAGES = [
+    st.Page("pages/0_Start.py",         title="Start",         icon="🚀"),
     st.Page("pages/1_Decode.py",        title="Decode",        icon="🔤"),
     st.Page("pages/2_Translate.py",     title="Translate",     icon="🌐"),
     st.Page("pages/3_Texts.py",         title="Texts",         icon="📚"),
@@ -43,6 +44,26 @@ def _load_llm_service(db, auth, build_llm_service, user_id: str) -> None:
             break
         except Exception:
             continue
+
+
+def _init_preferences(db, user_id: str) -> None:
+    """Set default service selections based on configured API keys."""
+    if "translate_service_name" not in st.session_state:
+        st.session_state.translate_service_name = "Google Translate"
+    if "decode_service_name" not in st.session_state:
+        providers = {r["provider"] for r in db.execute(
+            "SELECT provider FROM user_api_keys WHERE user_id = %s", (user_id,)
+        )}
+        if "anthropic" in providers:
+            st.session_state.decode_service_name = "Claude (Anthropic)"
+        elif "openai" in providers:
+            st.session_state.decode_service_name = "OpenAI"
+        else:
+            st.session_state.decode_service_name = "Google Translate"
+    if "max_line_length" not in st.session_state:
+        st.session_state.max_line_length = 65
+    if "ocr_line_height_threshold" not in st.session_state:
+        st.session_state.ocr_line_height_threshold = 30
 
 
 # -------------------------------------------------------
@@ -82,6 +103,7 @@ with tab_login:
                     st.session_state.user_id = str(user["id"])
                     st.session_state.username = username.strip()
                     _load_llm_service(db, auth, build_llm, str(user["id"]))
+                    _init_preferences(db, str(user["id"]))
                     st.rerun()
                 else:
                     st.error("Invalid username or password.")
@@ -120,6 +142,7 @@ with tab_register:
                     st.session_state.user_id = str(user["id"])
                     st.session_state.username = new_username.strip()
                     st.session_state.llm_service = None
+                    _init_preferences(db, str(user["id"]))
                     st.rerun()
             except Exception as e:
                 st.error(f"Registration failed: {e}")

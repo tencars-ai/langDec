@@ -22,6 +22,64 @@ auth = AuthService()
 st.title("Settings")
 
 # -------------------------------------------------------
+# Service Configuration
+# -------------------------------------------------------
+from services.translation_service import GoogleDeepTranslatorService, ArgosTranslateService
+
+FALLBACK_SERVICES = {
+    "Google Translate": GoogleDeepTranslatorService(),
+    "Argos Translate": ArgosTranslateService(),
+}
+_llm = st.session_state.get("llm_service")
+ALL_SERVICES = {**FALLBACK_SERVICES}
+if _llm:
+    ALL_SERVICES[_llm.name] = _llm
+
+st.subheader("Decoding Service")
+st.caption("Used for word-by-word decoding (Birkenbihl method). LLM gives best quality.")
+
+decode_options = list(ALL_SERVICES.keys())
+decode_default = st.session_state.get("decode_service_name", decode_options[0])
+decode_index = decode_options.index(decode_default) if decode_default in decode_options else 0
+selected_decode = st.radio("Decoding service", decode_options, index=decode_index, horizontal=True, key="decode_service_radio")
+
+st.markdown("#### Decoder Output")
+max_line_length = st.number_input(
+    "Line break after number of characters (0 = disabled)",
+    min_value=0, max_value=300,
+    value=st.session_state.get("max_line_length", 65),
+    step=5,
+    key="max_line_length_input",
+)
+
+st.markdown("#### OCR")
+ocr_threshold = st.number_input(
+    "Line height threshold (pixels)",
+    min_value=10, max_value=100,
+    value=st.session_state.get("ocr_line_height_threshold", 30),
+    step=5,
+    key="ocr_threshold_input",
+)
+
+st.markdown("---")
+st.subheader("Translation Service")
+st.caption("Used for natural/contextual translation.")
+
+translate_options = list(ALL_SERVICES.keys())
+translate_default = st.session_state.get("translate_service_name", "Google Translate")
+translate_index = translate_options.index(translate_default) if translate_default in translate_options else 0
+selected_translate = st.radio("Translation service", translate_options, index=translate_index, horizontal=True, key="translate_service_radio")
+
+if st.button("Save preferences", type="primary"):
+    st.session_state.decode_service_name = selected_decode
+    st.session_state.translate_service_name = selected_translate
+    st.session_state.max_line_length = max_line_length
+    st.session_state.ocr_line_height_threshold = ocr_threshold
+    st.success("Preferences saved.")
+
+st.markdown("---")
+
+# -------------------------------------------------------
 # API Key Management
 # -------------------------------------------------------
 st.subheader("LLM API Keys")

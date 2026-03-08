@@ -1,5 +1,7 @@
 """
 Personal dictionary – browse, search, edit and delete entries.
+6 fields per card: word_source, word_target, word_target_decoded,
+                   word_class, example_sentence, explanation.
 """
 import streamlit as st
 from utils.auth_ui import render_sidebar
@@ -36,18 +38,54 @@ lang_tgt = LANGUAGES[tgt_label]
 words = vocab.get_words(user_id, lang_source=lang_src, lang_target=lang_tgt, search=search or None)
 
 if not words:
-    st.info("No entries yet. Decode a text to auto-populate your dictionary.")
+    st.info("No entries yet. Decode a text or add words manually on the Start page.")
 else:
     st.markdown(f"**{len(words)} entries**")
     for word in words:
-        with st.expander(f"{word['word_source']}  →  {word['word_target']}  ({word['lang_source']} → {word['lang_target']})", expanded=False):
+        decoded_preview = f"  |  decoded: {word['word_target_decoded']}" if word.get("word_target_decoded") else ""
+        label = f"{word['word_source']}  →  {word['word_target']}{decoded_preview}  ({word['lang_source']} → {word['lang_target']})"
+        with st.expander(label, expanded=False):
+            # Row 1: source translations
             col_a, col_b = st.columns(2)
             with col_a:
-                new_target = st.text_input("Translation", value=word["word_target"], key=f"tgt_{word['id']}")
-                new_class = st.text_input("Word class", value=word["word_class"] or "", key=f"cls_{word['id']}")
+                new_target = st.text_input(
+                    "Natural translation",
+                    value=word["word_target"],
+                    key=f"tgt_{word['id']}",
+                    help="Contextual/natural translation",
+                )
             with col_b:
-                new_example = st.text_area("Example sentence", value=word["example_sentence"] or "", height=80, key=f"ex_{word['id']}")
-                st.caption(f"Frequency: {word['frequency']}  |  First seen: {str(word['first_seen'])[:10]}")
+                new_decoded = st.text_input(
+                    "Decoded translation",
+                    value=word.get("word_target_decoded") or "",
+                    key=f"dec_{word['id']}",
+                    help="Literal/Birkenbihl translation",
+                )
+
+            # Row 2: class + example
+            col_c, col_d = st.columns(2)
+            with col_c:
+                new_class = st.text_input(
+                    "Word class",
+                    value=word["word_class"] or "",
+                    key=f"cls_{word['id']}",
+                )
+            with col_d:
+                new_example = st.text_input(
+                    "Example sentence",
+                    value=word["example_sentence"] or "",
+                    key=f"ex_{word['id']}",
+                )
+
+            # Row 3: explanation
+            new_explanation = st.text_area(
+                "Explanation / notes",
+                value=word.get("explanation") or "",
+                height=60,
+                key=f"exp_{word['id']}",
+            )
+
+            st.caption(f"Frequency: {word['frequency']}  |  First seen: {str(word['first_seen'])[:10]}")
 
             col_save, col_del = st.columns(2)
             with col_save:
@@ -56,8 +94,10 @@ else:
                         user_id,
                         str(word["id"]),
                         word_target=new_target or None,
+                        word_target_decoded=new_decoded or None,
                         word_class=new_class or None,
                         example_sentence=new_example or None,
+                        explanation=new_explanation or None,
                     )
                     st.success("Saved.")
                     st.rerun()

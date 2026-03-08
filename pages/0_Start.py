@@ -1,5 +1,5 @@
 """
-Decode page – word-by-word Birkenbihl decoding only.
+Start page – combined Decode & Translate in one step, single output field.
 """
 import streamlit as st
 from PIL import Image
@@ -7,13 +7,14 @@ import io
 import fitz
 
 from utils.auth_ui import render_sidebar
-from utils.services_ui import get_decode_service, get_max_line_length, get_ocr_threshold
+from utils.services_ui import get_decode_service, get_translate_service, get_max_line_length, get_ocr_threshold
 from domain.decoder import WordByWordDecoder
+from domain.translator import Translator
 from domain.vocabulary import VocabularyManager
 from services.ocr_service import EasyOCRService
 from services.db_service import DBService
 
-st.set_page_config(page_title="langDec – Decode", layout="centered")
+st.set_page_config(page_title="langDec – Start", layout="centered")
 
 if "user_id" not in st.session_state:
     st.warning("Please log in first.")
@@ -34,14 +35,13 @@ st.markdown(
       textarea { font-family: "Courier New", Courier, monospace !important; font-size: 14px !important; line-height: 1.35 !important; }
       button[kind="primary"] { background-color: #007bff !important; border-color: #007bff !important; color: white !important; }
       button[kind="primary"]:hover { background-color: #0056b3 !important; border-color: #004085 !important; }
-      textarea[aria-label="Decoded text (word-by-word)"] { background-color: #d4edda !important; color: black !important; }
       .stDownloadButton > button { background-color: white !important; border: 1px solid #cccccc !important; color: black !important; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-st.title("Decode")
+st.title("Start")
 
 _ocr_service = EasyOCRService()
 
@@ -56,7 +56,7 @@ with col_right:
 source_language = LANGUAGES[source_label]
 target_language = LANGUAGES[target_label]
 
-for key in ("input_text", "decoded_text"):
+for key in ("input_text", "start_output"):
     if key not in st.session_state:
         st.session_state[key] = ""
 for key in ("show_camera", "show_browse"):
@@ -81,8 +81,7 @@ if st.session_state.show_camera:
         st.image(image, caption="Image to process", use_container_width=True)
         if st.button("🔍 Extract Text (OCR)", type="secondary", use_container_width=True, key="ocr_camera"):
             with st.spinner("Extracting text..."):
-                ocr_lang = EasyOCRService.get_language_code(source_label)
-                extracted = _ocr_service.extract_text(image, lang=ocr_lang, line_height_threshold=ocr_line_height_threshold)
+                extracted = _ocr_service.extract_text(image, lang=EasyOCRService.get_language_code(source_label), line_height_threshold=ocr_line_height_threshold)
                 st.session_state.input_text += ("\n" if st.session_state.input_text.strip() else "") + extracted
                 st.session_state.show_camera = False
                 st.rerun()
@@ -126,17 +125,10 @@ input_text = st.text_area("Input Text", height=220, placeholder="Paste your text
 if source_language == target_language:
     st.warning("Source and target language are identical.")
 
-# --- Buttons ---
-btn_col1, btn_col2 = st.columns(2)
-with btn_col1:
-    decode_clicked = st.button("Decode", type="primary", use_container_width=True)
-with btn_col2:
-    if st.button("Jump to Translate →", use_container_width=True):
-        st.session_state.transfer_source_label = source_label
-        st.session_state.transfer_target_label = target_label
-        st.switch_page("pages/2_Translate.py")
+decode_translate_clicked = st.button("Decode & Translate", type="primary", use_container_width=True)
 
 _decoder = WordByWordDecoder(get_decode_service())
+_translator = Translator(get_translate_service())
 ocr_line_height_threshold = get_ocr_threshold()
 max_line_length = get_max_line_length()
 
@@ -154,46 +146,133 @@ def _save_decoded_words(decoded: str, src_lang: str, tgt_lang: str) -> None:
     except Exception:
         pass
 
-# --- Decode logic ---
-if decode_clicked:
-    try:
-        with st.spinner("Decoding..."):
-            st.session_state.decoded_text = _decoder.decode(
-                text=input_text.strip(),
-                source_lang=source_language,
-                target_lang=target_language,
-                max_line_length=max_line_length,
+# --- Decode & Translate logic ---
+if decode_translate_clicked:
+    if not input_text.strip():
+        st.warning("Please enter some text first.")
+    else:
+        try:
+            decoded_text = ""
+            translated_text = ""
+            with st.spinner("Decoding..."):
+                decoded_text = _decoder.decode(
+                    text=input_text.strip(),
+                    source_lang=source_language,
+                    target_lang=target_language,
+                    max_line_length=max_line_length,
+                )
+            _save_decoded_words(decoded_text, source_language, target_language)
+            with st.spinner("Translating..."):
+                translated_text = _translator.translate(
+                    text=input_text.strip(),
+                    source_lang=source_language,
+                    target_lang=target_language,
+                )
+            st.session_state.start_output = (
+                "=== DECODING ===\n\n"
+                + decoded_text
+                + "\n\n=== TRANSLATION ===\n\n"
+                + translated_text
             )
-        _save_decoded_words(st.session_state.decoded_text, source_language, target_language)
-        st.success("Decoding completed!")
-    except Exception as e:
-        st.error(f"Error: {e}")
-        st.session_state.decoded_text = ""
+            st.success("Done!")
+        except Exception as e:
+            st.error(f"Error: {e}")
+            st.session_state.start_output = ""
 
-# --- Output ---
-st.text_area("Decoded text (word-by-word)", value=st.session_state.decoded_text, height=220, help="Select and copy (Ctrl/Cmd + C).")
+# --- Combined output ---
+st.text_area(
+    "Output",
+    value=st.session_state.start_output,
+    height=400,
+    label_visibility="collapsed",
+    help="Decoded text followed by natural translation.",
+)
 
 # --- Save to text library ---
-if st.session_state.decoded_text:
+if st.session_state.start_output:
     with st.expander("Save to text library", expanded=False):
-        title = st.text_input("Title", value="Untitled text")
-        if st.button("Save text", type="primary"):
+        db = DBService()
+        title = st.text_input("Title", value="Untitled text", key="save_title")
+
+        folders = db.execute(
+            "SELECT id, name FROM folders WHERE user_id = %s ORDER BY name",
+            (st.session_state.user_id,),
+        )
+        folder_options = {"(No folder)": None, **{f["name"]: str(f["id"]) for f in folders}}
+        folder_label = st.selectbox("Folder", list(folder_options.keys()), key="save_folder")
+
+        if st.button("Save text", type="primary", key="save_text_btn"):
             if title.strip():
                 try:
-                    DBService().execute_returning(
-                        "INSERT INTO texts (user_id, title, content, source_language) VALUES (%s, %s, %s, %s) RETURNING id",
-                        (st.session_state.user_id, title.strip(), input_text.strip(), source_language),
+                    db.execute_returning(
+                        "INSERT INTO texts (user_id, folder_id, title, content, source_language) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                        (st.session_state.user_id, folder_options[folder_label], title.strip(), input_text.strip(), source_language),
                     )
                     st.success(f"Saved as '{title}'.")
                 except Exception as e:
                     st.error(f"Failed: {e}")
 
+# --- Add word/phrase to vocabulary ---
+with st.expander("Add word or phrase to vocabulary", expanded=False):
+    st.caption("Copy a word or phrase from the output above and paste it here.")
+
+    vocab_word = st.text_input("Word / phrase (source language)", key="vocab_word_input")
+
+    col_t1, col_t2 = st.columns(2)
+    with col_t1:
+        vocab_translation = st.text_input("Natural translation", key="vocab_trans_input",
+                                          help="Contextual/natural translation in your mother tongue")
+    with col_t2:
+        vocab_decoded = st.text_input("Decoded translation", key="vocab_decoded_input",
+                                      help="Literal word-for-word translation (Birkenbihl)")
+
+    if st.button("Auto-translate both", key="vocab_autotrans_btn"):
+        if vocab_word.strip():
+            try:
+                natural = get_translate_service().translate_word(vocab_word.strip(), source_language, target_language)
+                decoded = get_decode_service().translate_word(vocab_word.strip(), source_language, target_language)
+                st.session_state.vocab_trans_input = natural
+                st.session_state.vocab_decoded_input = decoded
+                st.rerun()
+            except Exception as e:
+                st.error(f"Auto-translate failed: {e}")
+
+    col_w1, col_w2 = st.columns(2)
+    with col_w1:
+        word_class_options = ["", "noun", "verb", "adjective", "adverb", "phrase", "other"]
+        word_class = st.selectbox("Word class", word_class_options, key="vocab_class_input")
+    with col_w2:
+        example = st.text_input("Example sentence", key="vocab_example_input")
+
+    explanation = st.text_area("Explanation / notes", height=60, key="vocab_explanation_input")
+
+    if st.button("Save to dictionary", type="primary", key="vocab_save_btn"):
+        if vocab_word.strip() and vocab_translation.strip():
+            try:
+                from domain.vocabulary import VocabularyManager
+                VocabularyManager(DBService()).add_word(
+                    user_id=st.session_state.user_id,
+                    word_source=vocab_word.strip(),
+                    word_target=vocab_translation.strip(),
+                    word_target_decoded=vocab_decoded.strip() or None,
+                    lang_source=source_language,
+                    lang_target=target_language,
+                    word_class=word_class or None,
+                    example_sentence=example.strip() or None,
+                    explanation=explanation.strip() or None,
+                )
+                st.success(f"'{vocab_word}' saved to dictionary.")
+            except Exception as e:
+                st.error(f"Failed: {e}")
+        else:
+            st.warning("Please enter at least the word and natural translation.")
+
 # --- Download ---
 st.download_button(
-    "Download decoded text as .txt",
-    data=st.session_state.decoded_text or "",
-    file_name=f"decoded_{source_language}_to_{target_language}.txt",
+    "Download output as .txt",
+    data=st.session_state.start_output or "",
+    file_name=f"langdec_{source_language}_to_{target_language}.txt",
     mime="text/plain",
     use_container_width=True,
-    disabled=not bool(st.session_state.decoded_text),
+    disabled=not bool(st.session_state.start_output),
 )
