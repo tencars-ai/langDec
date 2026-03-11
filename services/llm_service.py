@@ -50,6 +50,98 @@ class LLMService(ABC):
         """
         ...
 
+    def translate_birkenbihl(
+        self, text: str, source_lang: str, target_lang: str
+    ) -> dict:
+        """
+        Batch Birkenbihl translation: send the full text in one LLM call.
+        Returns dict with keys:
+          - "words": list of translated tokens (1:1 with source tokens)
+          - "comments": any notes/explanations from the LLM (may be empty string)
+        Falls back to per-word translate_word() on parse errors.
+        """
+        raise NotImplementedError
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers for batch Birkenbihl translation
+# ---------------------------------------------------------------------------
+
+def _birkenbihl_system_prompt(source_lang: str, target_lang: str) -> str:
+    return (
+        f"You are a word-for-word translator following the Birkenbihl decoding method.\n"
+        f"Translate each word of the given {source_lang} text into {target_lang} INDIVIDUALLY,\n"
+        "preserving the original word order exactly.\n\n"
+        "Rules:\n"
+        "- Produce exactly one translation entry per source word — never merge or split words\n"
+        "- Translate literally — preserve meaning over naturalness; grammar may sound broken\n"
+        "- Use square brackets [ ] for grammatical helper words with no direct equivalent\n"
+        "- Do NOT use pipe characters | inside any translation entry\n"
+        "- Do NOT add explanations inside the word list\n"
+        "- If a word is idiomatic or needs a note, put it after NOTES:\n\n"
+        "Response format (follow exactly):\n"
+        "Line 1: pipe-separated translations, one per source word, in order\n"
+        f"Example for \"I love you\" (en\u2192de): ich|liebe|dich\n\n"
+        "If you have notes, append on a new line starting with NOTES:\n"
+        "If no notes are needed, output only line 1."
+    )
+
+
+def _birkenbihl_user_prompt(text: str, source_lang: str, target_lang: str, token_count: int) -> str:
+    return (
+        f"Text ({source_lang} \u2192 {target_lang}):\n{text}\n\n"
+        f"Source word count: {token_count}"
+    )
+
+
+def _parse_birkenbihl_response(
+    raw: str,
+    expected_count: int,
+    tokens: list,
+    source_lang: str,
+    target_lang: str,
+    fallback_service,
+) -> dict:
+    """Parse the LLM batch response. Falls back to per-word on mismatch."""
+    lines = raw.strip().splitlines()
+    word_line = ""
+    notes_lines = []
+    in_notes = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.upper().startswith("NOTES:"):
+            in_notes = True
+            rest = stripped[6:].strip()
+            if rest:
+                notes_lines.append(rest)
+        elif in_notes:
+            notes_lines.append(stripped)
+        elif not word_line:
+            word_line = stripped
+
+    words = [w.strip() for w in word_line.split("|")] if word_line else []
+
+    if len(words) != expected_count:
+        mismatch_note = (
+            f"[Batch mismatch: expected {expected_count} words, got {len(words)} — fell back to per-word translation]"
+        )
+        fallback_words = []
+        for token in tokens:
+            try:
+                fallback_words.append(
+                    fallback_service.translate_word(token, source_lang=source_lang, target_lang=target_lang)
+                )
+            except Exception as exc:
+                fallback_words.append(f"[ERR:{exc}]")
+        comments = mismatch_note
+        if notes_lines:
+            comments += "\n" + "\n".join(notes_lines)
+        return {"words": fallback_words, "comments": comments}
+
+    return {"words": words, "comments": "\n".join(notes_lines).strip()}
+
 
 # ---------------------------------------------------------------------------
 # OpenAI implementation
@@ -136,6 +228,15 @@ class OpenAIService(LLMService):
                 result["example_sentence"] = line.split(":", 1)[1].strip()
         return result
 
+    def translate_birkenbihl(self, text: str, source_lang: str, target_lang: str) -> dict:
+        tokens = text.split()
+        if not tokens:
+            return {"words": [], "comments": ""}
+        system = _birkenbihl_system_prompt(source_lang, target_lang)
+        user = _birkenbihl_user_prompt(text, source_lang, target_lang, len(tokens))
+        raw = self._chat(system, user)
+        return _parse_birkenbihl_response(raw, len(tokens), tokens, source_lang, target_lang, self)
+
 
 # ---------------------------------------------------------------------------
 # Anthropic (Claude) implementation
@@ -219,6 +320,21 @@ class ClaudeService(LLMService):
             elif line.startswith("example:"):
                 result["example_sentence"] = line.split(":", 1)[1].strip()
         return result
+
+    def translate_birkenbihl(self, text: str, source_lang: str, target_lang: str) -> dict:
+        tokens = text.split()
+        if not tokens:
+            return {"words": [], "comments": ""}
+        system = _birkenbihl_system_prompt(source_lang, target_lang)
+        user = _birkenbihl_user_prompt(text, source_lang, target_lang, len(tokens))
+        response = self._client.messages.create(
+            model=self._model,
+            max_tokens=2048,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        raw = response.content[0].text.strip()
+        return _parse_birkenbihl_response(raw, len(tokens), tokens, source_lang, target_lang, self)
 
 
 def build_llm_service(provider: str, api_key: str) -> LLMService:

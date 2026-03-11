@@ -56,7 +56,7 @@ with col_right:
 source_language = LANGUAGES[source_label]
 target_language = LANGUAGES[target_label]
 
-for key in ("input_text", "decoded_text"):
+for key in ("input_text", "decoded_text", "decoder_comments"):
     if key not in st.session_state:
         st.session_state[key] = ""
 for key in ("show_camera", "show_browse"):
@@ -158,20 +158,26 @@ def _save_decoded_words(decoded: str, src_lang: str, tgt_lang: str) -> None:
 if decode_clicked:
     try:
         with st.spinner("Decoding..."):
-            st.session_state.decoded_text = _decoder.decode(
+            _result = _decoder.decode(
                 text=input_text.strip(),
                 source_lang=source_language,
                 target_lang=target_language,
                 max_line_length=max_line_length,
             )
+        st.session_state.decoded_text = _result.aligned_text
+        st.session_state.decoder_comments = _result.comments
         _save_decoded_words(st.session_state.decoded_text, source_language, target_language)
         st.success("Decoding completed!")
     except Exception as e:
         st.error(f"Error: {e}")
         st.session_state.decoded_text = ""
+        st.session_state.decoder_comments = ""
 
 # --- Output ---
 st.text_area("Decoded text (word-by-word)", value=st.session_state.decoded_text, height=220, help="Select and copy (Ctrl/Cmd + C).")
+if st.session_state.get("decoder_comments"):
+    st.markdown("**Notes from translation:**")
+    st.info(st.session_state.decoder_comments)
 
 # --- Save to text library ---
 if st.session_state.decoded_text:
@@ -189,9 +195,12 @@ if st.session_state.decoded_text:
                     st.error(f"Failed: {e}")
 
 # --- Download ---
+_download_content = st.session_state.decoded_text or ""
+if st.session_state.get("decoder_comments"):
+    _download_content += f"\n\n--- Notes ---\n{st.session_state.decoder_comments}"
 st.download_button(
     "Download decoded text as .txt",
-    data=st.session_state.decoded_text or "",
+    data=_download_content,
     file_name=f"decoded_{source_language}_to_{target_language}.txt",
     mime="text/plain",
     use_container_width=True,

@@ -153,14 +153,17 @@ if decode_translate_clicked:
     else:
         try:
             decoded_text = ""
+            decoder_comments = ""
             translated_text = ""
             with st.spinner("Decoding..."):
-                decoded_text = _decoder.decode(
+                _decode_result = _decoder.decode(
                     text=input_text.strip(),
                     source_lang=source_language,
                     target_lang=target_language,
                     max_line_length=max_line_length,
                 )
+            decoded_text = _decode_result.aligned_text
+            decoder_comments = _decode_result.comments
             _save_decoded_words(decoded_text, source_language, target_language)
             with st.spinner("Translating..."):
                 translated_text = _translator.translate(
@@ -174,6 +177,8 @@ if decode_translate_clicked:
                 + "\n\n=== TRANSLATION ===\n\n"
                 + translated_text
             )
+            if decoder_comments:
+                st.session_state.start_output += "\n\n=== NOTES ===\n\n" + decoder_comments
             st.success("Done!")
         except Exception as e:
             st.error(f"Error: {e}")

@@ -14,6 +14,13 @@ from services.translation_service import TranslationService
 # @dataclass creates a simple data container class automatically
 # frozen=True makes this class immutable (can't change values after creation)
 @dataclass(frozen=True)
+class DecoderResult:
+    """Result from WordByWordDecoder.decode()."""
+    aligned_text: str
+    comments: str = ""
+
+
+@dataclass(frozen=True)
 class TokenPair:
     """Represents a pair of tokens: source word and its translation.
     
@@ -66,46 +73,88 @@ class WordByWordDecoder:
         source_lang: str,
         target_lang: str,
         max_line_length: int,
-    ) -> str:
+    ) -> DecoderResult:
         """Main method to decode text word-by-word.
-        
-        Args:
-            text: The text to decode (can be multiple words)
-            source_lang: Language code of input text (e.g., "en")
-            target_lang: Language code for translation (e.g., "de")
-            max_line_length: Maximum characters per line before breaking
-            
-        Returns:
-            Formatted string with aligned translations
-        """
-        # Clean up the input: if text is None, use ""
-        text = (text or "").strip()
-        
-        # Early return: if text is empty, just return empty string
-        if not text:
-            return ""
 
-        # Process each line separately to preserve line breaks
-        lines = text.split('\n')
+        Returns a DecoderResult with aligned_text and optional LLM comments.
+        Uses batch translation (one LLM call per line) when the service supports it,
+        otherwise falls back to per-word translation.
+        """
+        text = (text or "").strip()
+        if not text:
+            return DecoderResult(aligned_text="", comments="")
+
+        if hasattr(self.translation_service, "translate_birkenbihl"):
+            return self._decode_batch(text, source_lang, target_lang, max_line_length)
+        return self._decode_per_word(text, source_lang, target_lang, max_line_length)
+
+    def _decode_batch(
+        self,
+        text: str,
+        source_lang: str,
+        target_lang: str,
+        max_line_length: int,
+    ) -> DecoderResult:
+        """Batch path: one LLM call per non-empty line."""
         decoded_lines = []
-        
-        for line in lines:
+        all_comments = []
+
+        for line in text.split("\n"):
             line = line.strip()
-            # Skip empty lines but preserve them in output
             if not line:
                 decoded_lines.append("")
                 continue
-                
-            # Step 1: Split line into individual words
+
             tokens = self._tokenize(line)
-            
-            # Step 2: Translate each word and create TokenPair objects
-            pairs = self._translate_tokens(tokens, source_lang, target_lang)
-            
-            # Step 3: Format the pairs into aligned two-line output with line breaks
+            try:
+                result = self.translation_service.translate_birkenbihl(
+                    line, source_lang, target_lang
+                )
+                translated_words = result.get("words", [])
+                comments = result.get("comments", "")
+                if comments:
+                    all_comments.append(comments)
+                pairs = [
+                    TokenPair(source_token=src, target_token=tgt)
+                    for src, tgt in zip(tokens, translated_words)
+                ]
+            except Exception as exc:
+                all_comments.append(f"[Batch error: {exc} — fell back to per-word]")
+                pairs = []
+                for token in tokens:
+                    try:
+                        translated = self.translation_service.translate_word(
+                            token, source_lang=source_lang, target_lang=target_lang
+                        )
+                    except Exception as inner_exc:
+                        translated = f"[ERR:{inner_exc}]"
+                    pairs.append(TokenPair(source_token=token, target_token=translated))
+
             decoded_lines.append(self._format_aligned(pairs, max_line_length=max_line_length))
-        
-        return "\n".join(decoded_lines)
+
+        return DecoderResult(
+            aligned_text="\n".join(decoded_lines),
+            comments="\n\n".join(all_comments),
+        )
+
+    def _decode_per_word(
+        self,
+        text: str,
+        source_lang: str,
+        target_lang: str,
+        max_line_length: int,
+    ) -> DecoderResult:
+        """Per-word fallback path (Google/Argos services)."""
+        decoded_lines = []
+        for line in text.split("\n"):
+            line = line.strip()
+            if not line:
+                decoded_lines.append("")
+                continue
+            tokens = self._tokenize(line)
+            pairs = self._translate_tokens(tokens, source_lang, target_lang)
+            decoded_lines.append(self._format_aligned(pairs, max_line_length=max_line_length))
+        return DecoderResult(aligned_text="\n".join(decoded_lines), comments="")
 
     # Methods starting with _ are "private" - meant for internal use only
     def _tokenize(self, text: str) -> List[str]:
