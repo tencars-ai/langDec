@@ -21,12 +21,13 @@ class OCRService(ABC):
     """
 
     @abstractmethod
-    def extract_text(self, image: Image.Image, lang: str = 'eng') -> str:
+    def extract_text(self, image: Image.Image, lang: str = 'eng', line_height_threshold: int = 30) -> str:
         """Extract text from an image.
         
         Args:
             image: PIL Image object
             lang: Language code for OCR (e.g., 'eng', 'deu', 'por')
+            line_height_threshold: Vertical distance threshold for line breaks (pixels)
             
         Returns:
             Extracted text as string
@@ -69,7 +70,7 @@ class TesseractOCRService(OCRService):
         """Return the display name of this service."""
         return "Tesseract OCR"
     
-    def extract_text(self, image: Image.Image, lang: str = 'eng') -> str:
+    def extract_text(self, image: Image.Image, lang: str = 'eng', line_height_threshold: int = 30) -> str:
         """Extract text from an image using Tesseract.
         
         Args:
@@ -79,6 +80,7 @@ class TesseractOCRService(OCRService):
                   - 'deu' for German
                   - 'por' for Portuguese
                   - 'eng+deu' for multiple languages
+            line_height_threshold: Not used in Tesseract (for compatibility)
             
         Returns:
             Extracted text as string, with cleaned up whitespace
@@ -218,7 +220,7 @@ class EasyOCRService(OCRService):
         except ImportError:
             return None
     
-    def extract_text(self, image: Image.Image, lang: str = 'eng') -> str:
+    def extract_text(self, image: Image.Image, lang: str = 'eng', line_height_threshold: int = 30) -> str:
         """Extract text from an image using EasyOCR.
         
         Args:
@@ -227,6 +229,9 @@ class EasyOCRService(OCRService):
                   - 'eng' for English
                   - 'deu' for German (will be converted to 'de')
                   - 'por' for Portuguese (will be converted to 'pt')
+            line_height_threshold: Vertical distance in pixels to detect line breaks
+                                 Higher values = fewer line breaks (only major gaps)
+                                 Lower values = more line breaks (detect smaller gaps)
             
         Returns:
             Extracted text as string, with cleaned up whitespace
@@ -253,11 +258,8 @@ class EasyOCRService(OCRService):
             # readtext returns list of tuples: (bbox, text, confidence)
             results = reader.readtext(image_array)
             
-            # Extract just the text from results
-            texts = [text for (bbox, text, confidence) in results]
-            
-            # Join all text pieces with newlines
-            full_text = '\n'.join(texts)
+            # Smart joining: use bounding boxes to determine line breaks
+            full_text = self._smart_join_text(results, line_height_threshold)
             
             # Clean up the text
             text = self._clean_text(full_text)
@@ -269,6 +271,65 @@ class EasyOCRService(OCRService):
         except Exception as e:
             return f"[OCR Error: {str(e)}]"
     
+    def _smart_join_text(self, results, line_height_threshold: int = 30) -> str:
+        """Intelligently join OCR results based on bounding box positions.
+        
+        Args:
+            results: List of (bbox, text, confidence) tuples from EasyOCR
+            line_height_threshold: Vertical distance in pixels to detect line breaks
+            
+        Returns:
+            Text with smart line breaks preserved
+        """
+        if not results:
+            return ""
+        
+        # Extract text and vertical positions
+        text_blocks = []
+        for result in results:
+            # EasyOCR returns (bbox, text, confidence) - handle flexible unpacking
+            try:
+                if len(result) >= 2:
+                    bbox = result[0]
+                    text = result[1]
+                    # bbox is [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+                    # Get average Y position (vertical position)
+                    # Ensure bbox is a list of points
+                    if isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
+                        # Check if points are in correct format
+                        if all(isinstance(point, (list, tuple)) and len(point) >= 2 for point in bbox):
+                            avg_y = sum(point[1] for point in bbox) / len(bbox)
+                            text_blocks.append((avg_y, text))
+            except Exception:
+                continue  # Skip malformed results
+        
+        # Sort by vertical position (top to bottom)
+        text_blocks.sort(key=lambda x: x[0])
+        
+        # Join text with smart line breaks
+        result_parts = []
+        prev_y = None
+        
+        for y_pos, text in text_blocks:
+            if prev_y is None:
+                # First line
+                result_parts.append(text)
+            else:
+                # Calculate vertical distance to previous line
+                y_distance = y_pos - prev_y
+                
+                # Use configured threshold to determine line breaks
+                if y_distance > line_height_threshold:
+                    # Large gap → new line/paragraph
+                    result_parts.append('\n' + text)
+                else:
+                    # Small gap → same line, add space
+                    result_parts.append(' ' + text)
+            
+            prev_y = y_pos
+        
+        return ''.join(result_parts)
+    
     def _clean_text(self, text: str) -> str:
         """Clean up extracted text by removing excessive whitespace.
         
@@ -276,26 +337,23 @@ class EasyOCRService(OCRService):
             text: Raw OCR text
             
         Returns:
-            Cleaned text with:
-            - Removed leading/trailing whitespace
-            - Removed multiple consecutive spaces
-            - Preserved line breaks
+            Cleaned text with normalized whitespace
         """
-        # Split into lines to preserve line breaks
-        lines = text.split('\n')
+        import re
         
-        # Clean each line
-        cleaned_lines = []
-        for line in lines:
-            # Remove leading/trailing whitespace
-            line = line.strip()
-            # Replace multiple spaces with single space
-            import re
-            line = re.sub(r' +', ' ', line)
-            cleaned_lines.append(line)
+        # Remove leading/trailing whitespace
+        text = text.strip()
         
-        # Join lines back together
-        return '\n'.join(cleaned_lines)
+        # Replace multiple spaces with single space
+        text = re.sub(r' +', ' ', text)
+        
+        # Replace multiple consecutive newlines with max 2 (paragraph separator)
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        
+        # Remove spaces at start/end of lines
+        text = re.sub(r' *\n *', '\n', text)
+        
+        return text
     
     @staticmethod
     def get_language_code(language_label: str) -> str:

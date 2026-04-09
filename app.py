@@ -1,432 +1,148 @@
-# Streamlit is the web framework we use - it creates the web interface
+"""
+langDec – Entry point.
+Handles authentication and defines the navigation (st.navigation).
+app.py itself does not appear as a menu item.
+Default page after login: Decode.
+"""
 import streamlit as st
 
-# PostgreSQL connection (commented out for now)
-#import psycopg
+st.set_page_config(page_title="langDec", layout="wide")
 
-# Import our custom classes from other files
-from domain.decoder import WordByWordDecoder
-from domain.translator import Translator
-from services.translation_service import (
-    TranslationService,
-    GoogleDeepTranslatorService,
-    ArgosTranslateService,
-)
-from services.ocr_service import TesseractOCRService, EasyOCRService
+# -------------------------------------------------------
+# Navigation definition (only shown when logged in)
+# -------------------------------------------------------
+PAGES = [
+    st.Page("pages/0_Start.py",         title="Start",         icon="🚀"),
+    st.Page("pages/1_Decode.py",        title="Decode",        icon="🔤"),
+    st.Page("pages/2_Translate.py",     title="Translate",     icon="🌐"),
+    st.Page("pages/3_Texts.py",         title="Texts",         icon="📚"),
+    st.Page("pages/4_Dictionary.py",    title="Dictionary",    icon="📖"),
+    st.Page("pages/5_Vocab_Trainer.py", title="Vocab Trainer", icon="🃏"),
+    st.Page("pages/6_Audio.py",         title="Audio",         icon="🔊"),
+    st.Page("pages/7_Generate.py",      title="Generate",      icon="✨"),
+    st.Page("pages/8_Settings.py",      title="Settings",      icon="⚙️"),
+    st.Page("pages/9_Help.py",          title="Help",          icon="❓"),
+]
 
-# For image processing
-from PIL import Image
-import io
 
-# Dictionary of available translation services
-# Makes it easy to add new services - just add them here!
-AVAILABLE_SERVICES = {
-    "Google Translate": GoogleDeepTranslatorService(),
-    "Argos Translate": ArgosTranslateService(),
-}
+def _get_services():
+    from services.db_service import DBService
+    from services.auth_service import AuthService
+    from services.llm_service import build_llm_service
+    return DBService(), AuthService(), build_llm_service
 
-# OCR Service - Use EasyOCR as default (works on Streamlit Cloud without additional installation)
-_ocr_service = EasyOCRService()
 
-# These will be initialized when user selects a service
-_decoder = None
-_translator = None
+def _load_llm_service(db, auth, build_llm_service, user_id: str) -> None:
+    rows = db.execute(
+        "SELECT provider, api_key_encrypted FROM user_api_keys WHERE user_id = %s ORDER BY created_at DESC",
+        (user_id,),
+    )
+    for row in rows:
+        try:
+            decrypted = auth.decrypt_api_key(bytes(row["api_key_encrypted"]))
+            st.session_state.llm_service = build_llm_service(row["provider"], decrypted)
+            break
+        except Exception:
+            continue
 
-# -------------------------------------------------
-# 1) Page configuration
-# -------------------------------------------------
-# Configure how the Streamlit page looks
-st.set_page_config(page_title="langDec – Decoder", layout="centered")
 
-# Dictionary to map display names to language codes
-# Keys: what the user sees in the dropdown
-# Values: what we send to the translation API
-LANGUAGES = {
-    "German (de)": "de",
-    "English (en)": "en",
-    "Portuguese (pt)": "pt",
-}
-
-# Apply custom CSS styling to make text areas use monospace font
-# This makes the aligned output look better
-# Triple quotes for multi-line string
-st.markdown(
-    """
-    <style>
-      textarea {
-        font-family: "Courier New", Courier, monospace !important;
-        font-size: 14px !important;
-        line-height: 1.35 !important;
-      }
-      
-      /* Green button for Decode */
-      button[kind="primary"] {
-        background-color: #28a745 !important;
-        border-color: #28a745 !important;
-      }
-      button[kind="primary"]:hover {
-        background-color: #218838 !important;
-        border-color: #1e7e34 !important;
-      }
-      
-      /* Blue button for Translate */
-      button[kind="secondary"] {
-        background-color: #007bff !important;
-        border-color: #007bff !important;
-        color: white !important;
-      }
-      button[kind="secondary"]:hover {
-        background-color: #0056b3 !important;
-        border-color: #004085 !important;
-      }
-      
-      /* Light green background for decoded text area */
-      textarea[aria-label="Decoded text (word-by-word)"] {
-        background-color: #d4edda !important;
-        color: black !important;
-      }
-      
-      /* Light blue background for translated text area */
-      textarea[aria-label="Translated text (natural translation)"] {
-        background-color: #d1ecf1 !important;
-        color: black !important;
-      }
-      
-      /* White background for download button */
-      .stDownloadButton > button {
-        background-color: white !important;
-        border: 1px solid #cccccc !important;
-        color: black !important;
-      }
-      .stDownloadButton > button:hover {
-        background-color: #f8f9fa !important;
-        border-color: #999999 !important;
-      }
-    </style>
-    """,
-    unsafe_allow_html=True,  # Allow HTML/CSS in markdown
-)
-
-# Display the main title and subtitle
-st.title("Language Decoder")
-st.caption("Paste text → select languages → configure → decode")
-
-# -------------------------------------------------
-# 2) Helper function: line wrapping
-# -------------------------------------------------
-def apply_line_breaks(text: str, max_chars: int) -> str:
-    """
-    Inserts line breaks after max_chars characters to make text fit nicely.
-    
-    Args:
-        text: The text to wrap
-        max_chars: Maximum characters per line
-        
-    Returns:
-        Text with line breaks inserted
-        
-    If max_chars <= 0, the text is returned unchanged (no wrapping).
-    """
-    # No wrapping needed
-    if max_chars <= 0:
-        return text
-
-    lines = []              # List to collect all lines
-    current_line = ""       # Current line being built
-
-    # Go through each word
-    for word in text.split(" "):
-        # Check if word fits on current line (+ 1 for the space)
-        if len(current_line) + len(word) + 1 <= max_chars:
-            # Word fits! Add it to current line
-            # Add space before word, but not if line is empty
-            current_line += (" " if current_line else "") + word
+def _init_preferences(db, user_id: str) -> None:
+    """Set default service selections based on configured API keys."""
+    if "translate_service_name" not in st.session_state:
+        st.session_state.translate_service_name = "Google Translate"
+    if "decode_service_name" not in st.session_state:
+        providers = {r["provider"] for r in db.execute(
+            "SELECT provider FROM user_api_keys WHERE user_id = %s", (user_id,)
+        )}
+        if "anthropic" in providers:
+            st.session_state.decode_service_name = "Claude (Anthropic)"
+        elif "openai" in providers:
+            st.session_state.decode_service_name = "OpenAI"
         else:
-            # Word doesn't fit - save current line and start new one
-            lines.append(current_line)
-            current_line = word
-
-    # Don't forget the last line
-    if current_line:
-        lines.append(current_line)
-
-    # Join all lines with newline characters
-    return "\n".join(lines)
-
-# -------------------------------------------------
-# 3) Decoder function - connects UI to our decoder
-# -------------------------------------------------
-
-def decode_text(text: str, source_lang: str, target_lang: str) -> str:
-    """Wrapper function to call our decoder with the right parameters.
-    
-    Args:
-        text: Text to decode
-        source_lang: Source language code
-        target_lang: Target language code
-        
-    Returns:
-        Decoded and formatted text
-    """
-    # Call the decoder's decode method
-    # max_line_length comes from the UI config below (defined later in the code)
-    return _decoder.decode(
-        text=text,
-        source_lang=source_lang,
-        target_lang=target_lang,
-        max_line_length=max_line_length,  # This variable is defined below
-    )
+            st.session_state.decode_service_name = "Google Translate"
+    if "max_line_length" not in st.session_state:
+        st.session_state.max_line_length = 65
+    if "ocr_line_height_threshold" not in st.session_state:
+        st.session_state.ocr_line_height_threshold = 30
 
 
-def translate_text(text: str, source_lang: str, target_lang: str) -> str:
-    """Wrapper function to call our translator with the right parameters.
-    
-    Args:
-        text: Text to translate
-        source_lang: Source language code
-        target_lang: Target language code
-        
-    Returns:
-        Translated text
-    """
-    # Call the translator's translate method
-    return _translator.translate(
-        text=text,
-        source_lang=source_lang,
-        target_lang=target_lang,
-    )
+# -------------------------------------------------------
+# Logged in → run navigation
+# -------------------------------------------------------
+if "user_id" in st.session_state:
+    pg = st.navigation(PAGES)
+    pg.run()
+    st.stop()
 
+# -------------------------------------------------------
+# Not logged in → show login / register
+# -------------------------------------------------------
+st.title("langDec")
+st.caption("Language learning via the Birkenbihl decoding method.")
+st.markdown("---")
 
-# -------------------------------------------------
-# 4) Configuration section
-# -------------------------------------------------
-# st.expander creates a collapsible section
-# expanded=True means it's open by default
-with st.expander("Decoder configuration", expanded=True):
-    # Radio button for translation service selection
-    selected_service_name = st.radio(
-        "Translation Service",
-        options=list(AVAILABLE_SERVICES.keys()),
-        index=0,  # Default: first service (Google Translate)
-        help="Choose which translation service to use for decoding and translation.",
-        horizontal=True,  # Display options horizontally
-    )
-    
-    # Get the selected service instance
-    _translation_service = AVAILABLE_SERVICES[selected_service_name]
-    
-    # Initialize decoder and translator with selected service
-    _decoder = WordByWordDecoder(_translation_service)
-    _translator = Translator(_translation_service)
-    
-    # st.number_input creates a number input field
-    # The return value is stored in max_line_length
-    max_line_length = st.number_input(
-        "Line break after number of characters (0 = disabled)",
-        min_value=0,      # Minimum value allowed
-        max_value=300,    # Maximum value allowed
-        value=65,         # Default value when page loads
-        step=5,           # Increment when using +/- buttons
-        help="Automatically inserts line breaks to improve readability.",
-    )
+tab_login, tab_register = st.tabs(["Login", "Register"])
 
-# -------------------------------------------------
-# 5) Language selection and input
-# -------------------------------------------------
-# st.columns(2) creates two columns of equal width
-# We can place different elements in each column
-col_left, col_right = st.columns(2)
+with tab_login:
+    with st.form("login_form"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        login_btn = st.form_submit_button("Login", type="primary", use_container_width=True)
 
-# Place source language selector in left column
-with col_left:
-    # st.selectbox creates a dropdown menu
-    source_label = st.selectbox(
-        "Source Language",              # Label above dropdown
-        list(LANGUAGES.keys()),         # Options to choose from
-        index=2,                        # Default selection: index 2 = Portuguese
-    )
+    if login_btn:
+        if not username.strip() or not password:
+            st.error("Please enter username and password.")
+        else:
+            try:
+                db, auth, build_llm = _get_services()
+                user = db.execute_one(
+                    "SELECT id, password_hash FROM users WHERE username = %s",
+                    (username.strip(),),
+                )
+                if user and auth.verify_password(password, user["password_hash"]):
+                    st.session_state.user_id = str(user["id"])
+                    st.session_state.username = username.strip()
+                    _load_llm_service(db, auth, build_llm, str(user["id"]))
+                    _init_preferences(db, str(user["id"]))
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password.")
+            except Exception as e:
+                st.error(f"Login failed: {e}")
 
-# Place target language selector in right column
-with col_right:
-    target_label = st.selectbox(
-        "Target Language (Mother Tongue)",
-        list(LANGUAGES.keys()),
-        index=0,  # Default selection: index 0 = German
-    )
+with tab_register:
+    with st.form("register_form"):
+        new_username = st.text_input("Choose a username", key="reg_user")
+        new_email = st.text_input("Email (optional)", key="reg_email")
+        new_pw = st.text_input("Password", type="password", key="reg_pw")
+        new_pw2 = st.text_input("Confirm password", type="password", key="reg_pw2")
+        register_btn = st.form_submit_button("Register", type="primary", use_container_width=True)
 
-# Convert display labels to language codes
-# Example: "German (de)" → "de"
-source_language = LANGUAGES[source_label]
-target_language = LANGUAGES[target_label]
-
-# Initialize session state for input text if not exists
-if "input_text" not in st.session_state:
-    st.session_state.input_text = ""
-
-# -------------------------------------------------
-# OCR Section - Image Upload and Camera
-# -------------------------------------------------
-st.markdown("### 📷 OCR - Text from Image")
-
-# Create tabs for different input methods
-ocr_tab1, ocr_tab2 = st.tabs(["Upload Image", "Take Photo"])
-
-with ocr_tab1:
-    uploaded_file = st.file_uploader(
-        "Upload an image",
-        type=['png', 'jpg', 'jpeg', 'tiff', 'bmp'],
-        help="Upload an image containing text to extract",
-    )
-    
-with ocr_tab2:
-    camera_photo = st.camera_input(
-        "Take a photo",
-        help="Use your camera to capture text (works on mobile devices)",
-    )
-
-# Process OCR if image is available
-image_source = uploaded_file or camera_photo
-
-if image_source:
-    # Display the image
-    image = Image.open(image_source)
-    st.image(image, caption="Image to process", use_container_width=True)
-    
-    # OCR Button
-    if st.button("🔍 Extract Text (OCR)", type="secondary", use_container_width=True):
-        with st.spinner('Extracting text from image...'):
-            # Get language code for OCR
-            ocr_lang = EasyOCRService.get_language_code(source_label)
-            
-            # Perform OCR
-            extracted_text = _ocr_service.extract_text(image, lang=ocr_lang)
-            
-            # Insert at current position (append to existing text)
-            if st.session_state.input_text:
-                # Add space between existing and new text if needed
-                separator = "\n" if st.session_state.input_text.strip() else ""
-                st.session_state.input_text += separator + extracted_text
-            else:
-                st.session_state.input_text = extracted_text
-            
-            st.success(f'Text extracted! ({len(extracted_text)} characters)')
-            st.rerun()  # Refresh to show new text in input field
-
-st.markdown("---")  # Separator line
-
-# st.text_area creates a multi-line text input field
-# Now using session state to allow OCR text insertion
-# key="input_text" directly binds to st.session_state.input_text
-input_text = st.text_area(
-    "Input text",
-    height=220,
-    placeholder="Paste your text here or use OCR above…",
-    key="input_text",  # This automatically syncs with st.session_state.input_text
-)
-
-# Show warning if user selected same language for source and target
-if source_language == target_language:
-    st.warning("Source and target language are identical.")
-
-# Create two buttons side by side
-# st.columns creates columns for side-by-side layout
-btn_col1, btn_col2 = st.columns(2)
-
-# st.button creates a clickable button
-# Returns True when clicked, False otherwise
-with btn_col1:
-    decode_clicked = st.button(
-        "Decode",                          # Button text
-        type="primary",                    # Makes button blue/prominent
-        use_container_width=True,          # Makes button full width
-    )
-
-with btn_col2:
-    translate_clicked = st.button(
-        "Translate",                       # Button text
-        type="secondary",                  # Secondary button style
-        use_container_width=True,          # Makes button full width
-    )
-
-# -------------------------------------------------
-# 6) Output section
-# -------------------------------------------------
-# st.session_state is like a dictionary that persists between page reruns
-# It allows us to store data that survives when user interacts with the page
-# Check if 'decoded_text' and 'translated_text' exist in session state, if not, create them
-if "decoded_text" not in st.session_state:
-    st.session_state.decoded_text = ""  # Initialize with empty string
-if "translated_text" not in st.session_state:
-    st.session_state.translated_text = ""  # Initialize with empty string
-
-# Check if the Decode button was clicked
-if decode_clicked:
-    try:
-        # Show a spinner while processing
-        with st.spinner('Decoding...'):
-            # Perform the decoding
-            # .strip() removes leading/trailing whitespace from input
-            # The decoder already handles line breaks internally
-            st.session_state.decoded_text = decode_text(
-                input_text.strip(),
-                source_language,
-                target_language,
-            )
-        st.success('Decoding completed!')
-    except Exception as e:
-        st.error(f'Error during decoding: {str(e)}')
-        st.session_state.decoded_text = ""
-
-# Check if the Translate button was clicked
-if translate_clicked:
-    try:
-        # Show a spinner while processing
-        with st.spinner('Translating...'):
-            # Perform the translation
-            # .strip() removes leading/trailing whitespace from input
-            st.session_state.translated_text = translate_text(
-                input_text.strip(),
-                source_language,
-                target_language,
-            )
-        st.success('Translation completed!')
-    except Exception as e:
-        st.error(f'Error during translation: {str(e)}')
-        st.session_state.translated_text = ""
-
-# Display the decoded output in a text area
-# This text area is read-only by default (user can select/copy but not edit)
-st.text_area(
-    "Decoded text (word-by-word)",              # Label
-    value=st.session_state.decoded_text,        # Content to display
-    height=220,                                 # Height in pixels
-    help="Select and copy the text (Ctrl/Cmd + C).",  # Help tooltip
-)
-
-# Display the translated output in a second text area
-st.text_area(
-    "Translated text (natural translation)",    # Label
-    value=st.session_state.translated_text,     # Content to display
-    height=220,                                 # Height in pixels
-    help="Select and copy the text (Ctrl/Cmd + C).",  # Help tooltip
-)
-
-# Create combined output for download
-combined_output = ""
-if st.session_state.decoded_text:
-    combined_output += "=== DECODED (Word-by-Word) ===\n\n"
-    combined_output += st.session_state.decoded_text + "\n\n"
-if st.session_state.translated_text:
-    combined_output += "=== TRANSLATED (Natural) ===\n\n"
-    combined_output += st.session_state.translated_text + "\n"
-
-# Download button to save both outputs as a text file
-st.download_button(
-    "Download output as .txt",                  # Button text
-    data=combined_output or "",                 # File content with both outputs
-    file_name=f"output_{source_language}_to_{target_language}.txt",  # f-string for filename
-    mime="text/plain",                          # File type
-    use_container_width=True,                   # Full width button
-    disabled=not bool(combined_output),         # Disable if no output
-)
-
+    if register_btn:
+        if not new_username.strip():
+            st.error("Username is required.")
+        elif len(new_pw) < 8:
+            st.error("Password must be at least 8 characters.")
+        elif new_pw != new_pw2:
+            st.error("Passwords do not match.")
+        else:
+            try:
+                db, auth, build_llm = _get_services()
+                existing = db.execute_one(
+                    "SELECT id FROM users WHERE username = %s", (new_username.strip(),)
+                )
+                if existing:
+                    st.error("Username already taken.")
+                else:
+                    pw_hash = auth.hash_password(new_pw)
+                    user = db.execute_returning(
+                        "INSERT INTO users (username, email, password_hash) VALUES (%s, %s, %s) RETURNING id",
+                        (new_username.strip(), new_email.strip() or None, pw_hash),
+                    )
+                    st.session_state.user_id = str(user["id"])
+                    st.session_state.username = new_username.strip()
+                    st.session_state.llm_service = None
+                    _init_preferences(db, str(user["id"]))
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Registration failed: {e}")

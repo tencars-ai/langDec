@@ -27,7 +27,7 @@ Festlegung eines pragmatischen Technologie‑Stacks für den **ersten Prototypen
 
 ### 3.3 Hosting (Prototyp)
 - **Streamlit Community Cloud** für schnelle Bereitstellung der App
-- **Supabase (Postgres)** als gehostete Postgres-Instanz (für schnellen Start)
+- **Neon (neon.tech)** als gehostete serverlose Postgres-Instanz (eu-central-1 / AWS Frankfurt)
 
 > Hinweis: Später ist ein Wechsel zu eigenem Postgres (z. B. auf VPS/Managed DB) möglich.
 

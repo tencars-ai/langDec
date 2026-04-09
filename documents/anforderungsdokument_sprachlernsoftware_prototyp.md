@@ -116,6 +116,13 @@ Der Prototyp startet mit den Sprachen **Deutsch (Muttersprache)**, **Englisch** 
 - Plattformunabhängiges Design (für spätere Desktop / Web / Mobile Umsetzungen)
 - Fokus auf **Lern‑Usability**, nicht auf perfekte KI‑Übersetzung
 
+### 6.1 UI-Gestaltung / Typografie
+- Bedienelemente (Buttons, Labels, Eingabefelder) verwenden die System-Schrift (`sans-serif`) des Themes
+- **Textboxen mit Decoder-Ausgabe verwenden eine Monospace-Schrift** (`"Consolas", "Courier New", monospace`),
+  da die wortweise Übersetzung (Originalwort / Übersetzung) nur bei gleicher Zeichenbreite korrekt
+  untereinander ausgerichtet dargestellt werden kann
+- Zentrales Styling über `utils/styles.py` und `.streamlit/config.toml` (kein dupliziertes CSS pro Seite)
+
 ---
 
 ## 7. Abgrenzung (Prototyp‑Phase)
