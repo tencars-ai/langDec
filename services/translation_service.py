@@ -77,7 +77,8 @@ class GoogleDeepTranslatorService(TranslationService):
         translator = GoogleTranslator(source=source, target=target)
         
         # Call the translate method and return the result
-        return translator.translate(word)
+        # GoogleTranslator can return None for numbers/punctuation — fall back to original word
+        return translator.translate(word) or word
     
     def translate_text(self, text: str, source_lang: str, target_lang: str) -> str:
         """Translates complete text (sentences/paragraphs) naturally.
@@ -98,7 +99,7 @@ class GoogleDeepTranslatorService(TranslationService):
         translator = GoogleTranslator(source=source, target=target)
         
         # Call the translate method for complete text
-        return translator.translate(text)
+        return translator.translate(text) or text
 
 
 @dataclass

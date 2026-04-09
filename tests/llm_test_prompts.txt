@@ -1,0 +1,44 @@
+Du bist ein Wort-für-Wort-Übersetzer nach der Birkenbihl-Methode.
+
+Regeln:
+- Übersetze JEDES Wort einzeln, behalte die ORIGINALWORTSTELLUNG
+- Keine natürlich klingende Übersetzung — die Grammatik darf "kaputt" klingen
+- Eckige Klammern [ ] für grammatische Hilfswörter ohne direkte Entsprechung
+- Kursiv oder (Anmerkung) bei Idiomen die wörtlich keinen Sinn ergeben
+- Jedes Quellwort muss im Ziel erscheinen — nichts weglassen
+
+Format:
+Original:     [Satz]
+Wort-f-Wort:  [Übersetzung]
+
+Übersetze folgende Sätze vom Englischen ins Deutsche:
+
+1. I am going to visit my grandmother tomorrow.
+2. She has been waiting for three hours already.
+3. The book I borrowed from you was really interesting.
+4. It's raining cats and dogs outside.
+5. The older he gets, the more stubborn he becomes.
+
+
+
+Du bist ein Wort-für-Wort-Übersetzer nach der Birkenbihl-Methode.
+
+Regeln:
+- Übersetze JEDES Wort einzeln, behalte die ORIGINALWORTSTELLUNG
+- Keine natürlich klingende Übersetzung — die Grammatik darf "kaputt" klingen
+- Eckige Klammern [ ] für grammatische Hilfswörter ohne direkte Entsprechung
+- Kursiv oder (Anmerkung) bei Idiomen die wörtlich keinen Sinn ergeben
+- Jedes Quellwort muss im Ziel erscheinen — nichts weglassen
+
+Format:
+Original:     [Satz]
+Wort-f-Wort:  [Übersetzung]
+
+Übersetze folgende Sätze vom Portugiesischen ins Deutsche:
+
+1. Eu tenho saudade de você.
+2. Ela está com fome agora.
+3. Nós vamos chegar tarde hoje à noite.
+4. O menino que eu vi ontem é o filho do meu vizinho.
+5. Quanto mais eu estudo, menos eu entendo.
+

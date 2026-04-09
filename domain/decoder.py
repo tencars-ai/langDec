@@ -1,18 +1,22 @@
 # Enable modern type hints (allows referencing class names before definition)
 from __future__ import annotations
 
-# dataclass: Automatically generates __init__, __repr__, etc. based on class attributes
+import concurrent.futures
 from dataclasses import dataclass
-# List: Type hint for lists, e.g., List[str] means "a list of strings"
 from typing import List
 
-# Import from services → translation_service module
-# TranslationService is the interface (Protocol) for translation providers
 from services.translation_service import TranslationService
 
 
 # @dataclass creates a simple data container class automatically
 # frozen=True makes this class immutable (can't change values after creation)
+@dataclass(frozen=True)
+class DecoderResult:
+    """Result from WordByWordDecoder.decode()."""
+    aligned_text: str
+    comments: str = ""
+
+
 @dataclass(frozen=True)
 class TokenPair:
     """Represents a pair of tokens: source word and its translation.
@@ -31,7 +35,7 @@ class TokenPair:
         Example: "hello" (5) and "hallo" (5) → returns 5
                  "hi" (2) and "hallo" (5) → returns 5
         """
-        return max(len(self.source_token), len(self.target_token))
+        return max(len(self.source_token or ""), len(self.target_token or ""))
 
 
 class WordByWordDecoder:
@@ -66,46 +70,93 @@ class WordByWordDecoder:
         source_lang: str,
         target_lang: str,
         max_line_length: int,
-    ) -> str:
+    ) -> DecoderResult:
         """Main method to decode text word-by-word.
-        
-        Args:
-            text: The text to decode (can be multiple words)
-            source_lang: Language code of input text (e.g., "en")
-            target_lang: Language code for translation (e.g., "de")
-            max_line_length: Maximum characters per line before breaking
-            
-        Returns:
-            Formatted string with aligned translations
-        """
-        # Clean up the input: if text is None, use ""
-        text = (text or "").strip()
-        
-        # Early return: if text is empty, just return empty string
-        if not text:
-            return ""
 
-        # Process each line separately to preserve line breaks
-        lines = text.split('\n')
+        Returns a DecoderResult with aligned_text and optional LLM comments.
+        Uses batch translation (one LLM call per line) when the service supports it,
+        otherwise falls back to per-word translation.
+        """
+        text = (text or "").strip()
+        if not text:
+            return DecoderResult(aligned_text="", comments="")
+
+        if hasattr(self.translation_service, "translate_birkenbihl"):
+            return self._decode_batch(text, source_lang, target_lang, max_line_length)
+        return self._decode_per_word(text, source_lang, target_lang, max_line_length)
+
+    def _decode_batch(
+        self,
+        text: str,
+        source_lang: str,
+        target_lang: str,
+        max_line_length: int,
+    ) -> DecoderResult:
+        """Batch path: all non-empty lines dispatched in parallel, one LLM call each."""
+        raw_lines = text.split("\n")
+        non_empty = [(i, line.strip()) for i, line in enumerate(raw_lines) if line.strip()]
+
+        # Dispatch all lines concurrently (I/O-bound LLM calls → threads work well).
+        line_results: dict[int, dict] = {}
+        all_comments: list[str] = []
+
+        max_workers = min(len(non_empty), 8)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_idx = {
+                executor.submit(
+                    self.translation_service.translate_birkenbihl, line, source_lang, target_lang
+                ): i
+                for i, line in non_empty
+            }
+            for future in concurrent.futures.as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    line_results[idx] = future.result()
+                except Exception as exc:
+                    all_comments.append(f"[Line {idx + 1} error: {exc}]")
+                    line_results[idx] = {"words": [], "comments": ""}
+
         decoded_lines = []
-        
-        for line in lines:
-            line = line.strip()
-            # Skip empty lines but preserve them in output
+        for i, raw_line in enumerate(raw_lines):
+            line = raw_line.strip()
             if not line:
                 decoded_lines.append("")
                 continue
-                
-            # Step 1: Split line into individual words
+            result = line_results[i]
             tokens = self._tokenize(line)
-            
-            # Step 2: Translate each word and create TokenPair objects
-            pairs = self._translate_tokens(tokens, source_lang, target_lang)
-            
-            # Step 3: Format the pairs into aligned two-line output with line breaks
+            translated_words = result.get("words", [])
+            comments = result.get("comments", "")
+            if comments:
+                all_comments.append(comments)
+            pairs = [
+                TokenPair(source_token=src, target_token=tgt)
+                for src, tgt in zip(tokens, translated_words)
+            ]
             decoded_lines.append(self._format_aligned(pairs, max_line_length=max_line_length))
-        
-        return "\n".join(decoded_lines)
+
+        return DecoderResult(
+            aligned_text="\n".join(decoded_lines),
+            comments="\n\n".join(all_comments),
+        )
+
+    def _decode_per_word(
+        self,
+        text: str,
+        source_lang: str,
+        target_lang: str,
+        max_line_length: int,
+    ) -> DecoderResult:
+        """Per-word fallback path (Google/Argos services)."""
+        decoded_lines = []
+        for line in text.split("\n"):
+            line = line.strip()
+            if not line:
+                decoded_lines.append("")
+                continue
+            tokens = self._tokenize(line)
+            pairs = self._translate_tokens(tokens, source_lang, target_lang)
+            decoded_lines.append(self._format_aligned(pairs, max_line_length=max_line_length))
+        return DecoderResult(aligned_text="\n".join(decoded_lines), comments="")
 
     # Methods starting with _ are "private" - meant for internal use only
     def _tokenize(self, text: str) -> List[str]:
@@ -150,7 +201,7 @@ class WordByWordDecoder:
                 # Call the translation service to translate this word
                 translated = self.translation_service.translate_word(
                     token, source_lang=source_lang, target_lang=target_lang
-                )
+                ) or token
             except Exception as exc:
                 # If translation fails, use an error message instead
                 # f"..." is an f-string: formats the exception into the string
