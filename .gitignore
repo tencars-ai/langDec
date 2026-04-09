@@ -10,3 +10,4 @@ dictionaries
 
 # Editor temp files
 *.tmp
+*.tmp.*
