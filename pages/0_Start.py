@@ -1,6 +1,7 @@
 """
 Start page – combined Decode & Translate in one step, single output field.
 """
+import concurrent.futures
 import streamlit as st
 from PIL import Image
 import io
@@ -8,38 +9,23 @@ import fitz
 
 from utils.auth_ui import render_sidebar
 from utils.services_ui import get_decode_service, get_translate_service, get_max_line_length, get_ocr_threshold
+from utils.styles import inject_styles
+from utils.ui import LANGUAGES, save_to_library
 from domain.decoder import WordByWordDecoder
 from domain.translator import Translator
 from domain.vocabulary import VocabularyManager
 from services.ocr_service import EasyOCRService
+from services.tts_service import GTTSService
 from services.db_service import DBService
 
-st.set_page_config(page_title="langDec – Start", layout="centered")
+st.set_page_config(page_title="langDec – Start", layout="wide")
 
 if "user_id" not in st.session_state:
     st.warning("Please log in first.")
     st.stop()
 
 render_sidebar()
-
-LANGUAGES = {
-    "German (de)": "de",
-    "English (en)": "en",
-    "Portuguese (pt)": "pt",
-}
-
-st.markdown(
-    """
-    <style>
-      h1 { font-size: 1.8rem !important; margin-top: 0.5rem !important; margin-bottom: 0.3rem !important; }
-      textarea { font-family: "Courier New", Courier, monospace !important; font-size: 14px !important; line-height: 1.35 !important; }
-      button[kind="primary"] { background-color: #007bff !important; border-color: #007bff !important; color: white !important; }
-      button[kind="primary"]:hover { background-color: #0056b3 !important; border-color: #004085 !important; }
-      .stDownloadButton > button { background-color: white !important; border: 1px solid #cccccc !important; color: black !important; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+inject_styles()
 
 st.title("Start")
 
@@ -56,12 +42,20 @@ with col_right:
 source_language = LANGUAGES[source_label]
 target_language = LANGUAGES[target_label]
 
-for key in ("input_text", "start_output"):
+for key in ("input_text", "start_output", "start_decoded", "start_translated", "start_comments"):
     if key not in st.session_state:
         st.session_state[key] = ""
+if "start_audio" not in st.session_state:
+    st.session_state.start_audio = None  # bytes or None
 for key in ("show_camera", "show_browse"):
     if key not in st.session_state:
         st.session_state[key] = False
+
+_decoder = WordByWordDecoder(get_decode_service())
+_translator = Translator(get_translate_service())
+_tts = GTTSService()
+ocr_line_height_threshold = get_ocr_threshold()
+max_line_length = get_max_line_length()
 
 st.markdown("**Input Text**")
 ocr_col1, ocr_col2 = st.columns(2)
@@ -127,95 +121,152 @@ if source_language == target_language:
 
 decode_translate_clicked = st.button("Decode & Translate", type="primary", use_container_width=True)
 
-_decoder = WordByWordDecoder(get_decode_service())
-_translator = Translator(get_translate_service())
-ocr_line_height_threshold = get_ocr_threshold()
-max_line_length = get_max_line_length()
-
 # --- Auto-save decoded words ---
 def _save_decoded_words(decoded: str, src_lang: str, tgt_lang: str) -> None:
+    """Parse aligned two-line output and save word pairs to the dictionary.
+    Format per block:
+        hello  world
+        hallo  Welt
+    Blocks are separated by blank lines.
+    """
     try:
         vocab = VocabularyManager(DBService())
-        for token in decoded.split():
-            if "/" in token:
-                parts = token.split("/", 1)
-                if len(parts) == 2:
-                    w_src, w_tgt = parts[0].strip(), parts[1].strip()
-                    if w_src and w_tgt:
-                        vocab.add_word(st.session_state.user_id, w_src, w_tgt, src_lang, tgt_lang)
+        for block in decoded.split("\n\n"):
+            lines = [l for l in block.splitlines() if l.strip()]
+            if len(lines) < 2:
+                continue
+            src_words = lines[0].split()
+            tgt_words = lines[1].split()
+            for w_src, w_tgt in zip(src_words, tgt_words):
+                w_src, w_tgt = w_src.strip(), w_tgt.strip()
+                if w_src and w_tgt:
+                    vocab.add_word(st.session_state.user_id, w_src, w_tgt, src_lang, tgt_lang)
     except Exception:
         pass
 
-# --- Decode & Translate logic ---
+# --- Output slots: populated live during processing or from session state on re-renders ---
+_decoded_slot = st.empty()
+_translated_slot = st.empty()
+_notes_slot = st.empty()
+_audio_slot = st.empty()
+
+# --- Decode & Translate & Audio logic ---
 if decode_translate_clicked:
     if not input_text.strip():
         st.warning("Please enter some text first.")
     else:
-        try:
-            decoded_text = ""
-            decoder_comments = ""
-            translated_text = ""
-            with st.spinner("Decoding..."):
-                _decode_result = _decoder.decode(
-                    text=input_text.strip(),
-                    source_lang=source_language,
-                    target_lang=target_language,
-                    max_line_length=max_line_length,
+        with st.status("Processing in parallel…", expanded=True) as _status:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as _executor:
+                _future_decode = _executor.submit(
+                    _decoder.decode,
+                    input_text.strip(), source_language, target_language, max_line_length,
                 )
-            decoded_text = _decode_result.aligned_text
-            decoder_comments = _decode_result.comments
-            _save_decoded_words(decoded_text, source_language, target_language)
-            with st.spinner("Translating..."):
-                translated_text = _translator.translate(
-                    text=input_text.strip(),
-                    source_lang=source_language,
-                    target_lang=target_language,
+                _future_translate = _executor.submit(
+                    _translator.translate,
+                    input_text.strip(), source_language, target_language,
                 )
-            st.session_state.start_output = (
-                "=== DECODING ===\n\n"
-                + decoded_text
-                + "\n\n=== TRANSLATION ===\n\n"
-                + translated_text
-            )
-            if decoder_comments:
-                st.session_state.start_output += "\n\n=== NOTES ===\n\n" + decoder_comments
-            st.success("Done!")
-        except Exception as e:
-            st.error(f"Error: {e}")
-            st.session_state.start_output = ""
+                _future_audio = _executor.submit(
+                    _tts.synthesize,
+                    input_text.strip(), source_language,
+                )
+                for _future in concurrent.futures.as_completed(
+                    [_future_decode, _future_translate, _future_audio]
+                ):
+                    if _future is _future_decode:
+                        try:
+                            _r = _future.result()
+                            st.session_state.start_decoded = _r.aligned_text
+                            st.session_state.start_comments = _r.comments
+                            _save_decoded_words(_r.aligned_text, source_language, target_language)
+                            st.write("✅ Decoding done")
+                            with _decoded_slot.container():
+                                st.markdown("#### 🔤 Decoding (word-by-word)")
+                                st.text_area(
+                                    "Decoded",
+                                    value=_r.aligned_text,
+                                    height=200,
+                                    label_visibility="collapsed",
+                                    help="Monospace alignment — original word above, literal translation below.",
+                                )
+                            if _r.comments:
+                                with _notes_slot.container():
+                                    st.markdown("#### 📝 Notes")
+                                    st.info(_r.comments)
+                        except Exception as _e:
+                            st.write(f"❌ Decoding error: {_e}")
+                            st.session_state.start_decoded = ""
+                            st.session_state.start_comments = ""
+                    elif _future is _future_translate:
+                        try:
+                            _t = _future.result()
+                            st.session_state.start_translated = _t
+                            st.write("✅ Translation done")
+                            with _translated_slot.container():
+                                st.markdown("#### 🌐 Translation (natural)")
+                                st.markdown(_t)
+                        except Exception as _e:
+                            st.write(f"❌ Translation error: {_e}")
+                            st.session_state.start_translated = ""
+                    else:
+                        try:
+                            _audio = _future.result()
+                            st.session_state.start_audio = _audio
+                            st.write("✅ Audio ready")
+                            with _audio_slot.container():
+                                st.markdown("#### 🔊 Audio")
+                                st.audio(_audio, format="audio/mp3")
+                        except Exception as _e:
+                            st.write(f"❌ Audio error: {_e}")
+                            st.session_state.start_audio = None
+            _status.update(label="Done!", state="complete")
 
-# --- Combined output ---
-st.text_area(
-    "Output",
-    value=st.session_state.start_output,
-    height=400,
-    label_visibility="collapsed",
-    help="Decoded text followed by natural translation.",
-)
+        st.session_state.start_output = (
+            "=== DECODING ===\n\n" + st.session_state.start_decoded
+            + "\n\n=== TRANSLATION ===\n\n" + st.session_state.start_translated
+            + ("\n\n=== NOTES ===\n\n" + st.session_state.start_comments
+               if st.session_state.start_comments else "")
+        )
+
+# --- Populate output slots (after click or on re-renders from session state) ---
+if st.session_state.start_decoded:
+    with _decoded_slot.container():
+        st.markdown("#### 🔤 Decoding (word-by-word)")
+        st.text_area(
+            "Decoded",
+            value=st.session_state.start_decoded,
+            height=200,
+            label_visibility="collapsed",
+            help="Monospace alignment — original word above, literal translation below.",
+        )
+
+if st.session_state.start_translated:
+    with _translated_slot.container():
+        st.markdown("#### 🌐 Translation (natural)")
+        st.markdown(st.session_state.start_translated)
+
+if st.session_state.start_comments:
+    with _notes_slot.container():
+        st.markdown("#### 📝 Notes")
+        st.info(st.session_state.start_comments)
+
+if st.session_state.start_audio:
+    with _audio_slot.container():
+        st.markdown("#### 🔊 Audio")
+        st.audio(st.session_state.start_audio, format="audio/mp3")
 
 # --- Save to text library ---
 if st.session_state.start_output:
-    with st.expander("Save to text library", expanded=False):
-        db = DBService()
-        title = st.text_input("Title", value="Untitled text", key="save_title")
-
-        folders = db.execute(
-            "SELECT id, name FROM folders WHERE user_id = %s ORDER BY name",
-            (st.session_state.user_id,),
-        )
-        folder_options = {"(No folder)": None, **{f["name"]: str(f["id"]) for f in folders}}
-        folder_label = st.selectbox("Folder", list(folder_options.keys()), key="save_folder")
-
-        if st.button("Save text", type="primary", key="save_text_btn"):
-            if title.strip():
-                try:
-                    db.execute_returning(
-                        "INSERT INTO texts (user_id, folder_id, title, content, source_language) VALUES (%s, %s, %s, %s, %s) RETURNING id",
-                        (st.session_state.user_id, folder_options[folder_label], title.strip(), input_text.strip(), source_language),
-                    )
-                    st.success(f"Saved as '{title}'.")
-                except Exception as e:
-                    st.error(f"Failed: {e}")
+    save_to_library(
+        input_text.strip(),
+        source_language,
+        st.session_state.user_id,
+        key_prefix="start_save",
+        decoded_text=st.session_state.start_decoded,
+        translated_text=st.session_state.start_translated,
+        target_language=target_language,
+        notes=st.session_state.start_comments,
+        audio_bytes=st.session_state.start_audio,
+    )
 
 # --- Add word/phrase to vocabulary ---
 with st.expander("Add word or phrase to vocabulary", expanded=False):

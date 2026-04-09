@@ -8,6 +8,14 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Optional
 
+# Maps ISO codes to full language names used in LLM prompts.
+# Full names produce more reliable results than bare codes like "de" or "pt".
+_LANG_NAMES: dict[str, str] = {
+    "de": "German",
+    "en": "English",
+    "pt": "Portuguese",
+}
+
 
 class LLMService(ABC):
     """
@@ -68,29 +76,42 @@ class LLMService(ABC):
 # ---------------------------------------------------------------------------
 
 def _birkenbihl_system_prompt(source_lang: str, target_lang: str) -> str:
+    src = _LANG_NAMES.get(source_lang, source_lang)
+    tgt = _LANG_NAMES.get(target_lang, target_lang)
     return (
-        f"You are a word-for-word translator following the Birkenbihl decoding method.\n"
-        f"Translate each word of the given {source_lang} text into {target_lang} INDIVIDUALLY,\n"
-        "preserving the original word order exactly.\n\n"
-        "Rules:\n"
-        "- Produce exactly one translation entry per source word — never merge or split words\n"
-        "- Translate literally — preserve meaning over naturalness; grammar may sound broken\n"
-        "- Use square brackets [ ] for grammatical helper words with no direct equivalent\n"
-        "- Do NOT use pipe characters | inside any translation entry\n"
-        "- Do NOT add explanations inside the word list\n"
-        "- If a word is idiomatic or needs a note, put it after NOTES:\n\n"
-        "Response format (follow exactly):\n"
-        "Line 1: pipe-separated translations, one per source word, in order\n"
-        f"Example for \"I love you\" (en\u2192de): ich|liebe|dich\n\n"
-        "If you have notes, append on a new line starting with NOTES:\n"
-        "If no notes are needed, output only line 1."
+        f"You are a strict word-for-word translator using the Birkenbihl decoding method.\n\n"
+        f"TASK: Translate each word of the given {src} text into {tgt}, one word at a time, "
+        f"preserving the EXACT original word order.\n\n"
+        "CRITICAL RULES:\n"
+        "1. Output EXACTLY ONE translation per source word — never merge two words, never split one word into two\n"
+        "2. Translate each word IN ISOLATION — do NOT rearrange words to match "
+        f"{tgt} grammar\n"
+        f"3. The result WILL sound grammatically broken in {tgt} — this is CORRECT and INTENDED\n"
+        "4. Use [ ] only for grammatical particles that have no direct equivalent\n"
+        "5. Do NOT use | inside any translation entry\n"
+        "6. Do NOT produce a natural translation — if the output sounds fluent, it is WRONG\n"
+        "7. Numbers written as digits (e.g. 1, 42, 1., 3.5) must be copied UNCHANGED — do not translate or spell them out\n\n"
+        "CORRECT example (Portuguese → German):\n"
+        "Source:  Eu  tenho  saudade  de    você\n"
+        "Output:  Ich|habe  |Sehnsucht|von  |dir\n\n"
+        "INCORRECT (this is a natural translation — do NOT do this):\n"
+        "Source:  Eu  tenho  saudade  de  você\n"
+        "Output:  Ich vermisse dich\n\n"
+        "Response format:\n"
+        "Line 1: pipe-separated literal translations, one entry per source word, in source order\n"
+        "Optional: one line starting with NOTES: for idioms or remarks\n"
+        "Output ONLY line 1 (and optional NOTES). Nothing else."
     )
 
 
 def _birkenbihl_user_prompt(text: str, source_lang: str, target_lang: str, token_count: int) -> str:
+    src = _LANG_NAMES.get(source_lang, source_lang)
+    tgt = _LANG_NAMES.get(target_lang, target_lang)
     return (
-        f"Text ({source_lang} \u2192 {target_lang}):\n{text}\n\n"
-        f"Source word count: {token_count}"
+        f"Translate word-for-word from {src} to {tgt}.\n"
+        f"Source text: {text}\n"
+        f"Source word count: {token_count}\n"
+        f"Required output entries: {token_count} (one per source word, pipe-separated)"
     )
 
 
@@ -327,13 +348,7 @@ class ClaudeService(LLMService):
             return {"words": [], "comments": ""}
         system = _birkenbihl_system_prompt(source_lang, target_lang)
         user = _birkenbihl_user_prompt(text, source_lang, target_lang, len(tokens))
-        response = self._client.messages.create(
-            model=self._model,
-            max_tokens=2048,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-        )
-        raw = response.content[0].text.strip()
+        raw = self._message(system, user)
         return _parse_birkenbihl_response(raw, len(tokens), tokens, source_lang, target_lang, self)
 
 

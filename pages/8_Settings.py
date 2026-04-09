@@ -3,17 +3,19 @@ Settings page – API key management, password change, account deletion.
 """
 import streamlit as st
 from utils.auth_ui import render_sidebar
+from utils.styles import inject_styles
 from services.db_service import DBService
 from services.auth_service import AuthService
 from services.llm_service import build_llm_service
 
-st.set_page_config(page_title="langDec – Settings", layout="centered")
+st.set_page_config(page_title="langDec – Settings", layout="wide")
 
 if "user_id" not in st.session_state:
     st.warning("Please log in first.")
     st.stop()
 
 render_sidebar()
+inject_styles()
 
 user_id = st.session_state.user_id
 db = DBService()
@@ -43,7 +45,7 @@ decode_default = st.session_state.get("decode_service_name", decode_options[0])
 decode_index = decode_options.index(decode_default) if decode_default in decode_options else 0
 selected_decode = st.radio("Decoding service", decode_options, index=decode_index, horizontal=True, key="decode_service_radio")
 
-st.markdown("#### Decoder Output")
+st.subheader("Decoder Output")
 max_line_length = st.number_input(
     "Line break after number of characters (0 = disabled)",
     min_value=0, max_value=300,
@@ -52,7 +54,7 @@ max_line_length = st.number_input(
     key="max_line_length_input",
 )
 
-st.markdown("#### OCR")
+st.subheader("OCR")
 ocr_threshold = st.number_input(
     "Line height threshold (pixels)",
     min_value=10, max_value=100,
@@ -173,7 +175,7 @@ st.warning("This permanently deletes your account, all texts, dictionary entries
 with st.form("delete_account"):
     confirm_pw = st.text_input("Enter your password to confirm", type="password")
     confirm_check = st.checkbox("I understand this cannot be undone.")
-    delete_submitted = st.form_submit_button("Delete my account", type="primary")
+    delete_submitted = st.form_submit_button("Delete my account")
 
 if delete_submitted:
     if not confirm_check:

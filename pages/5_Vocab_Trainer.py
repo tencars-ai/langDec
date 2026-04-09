@@ -3,16 +3,18 @@ Vocabulary Trainer – flashcard box system with spaced repetition.
 """
 import streamlit as st
 from utils.auth_ui import render_sidebar
+from utils.styles import inject_styles
 from domain.flashcard import FlashcardBox
 from services.db_service import DBService
 
-st.set_page_config(page_title="langDec – Vocab Trainer", layout="centered")
+st.set_page_config(page_title="langDec – Vocab Trainer", layout="wide")
 
 if "user_id" not in st.session_state:
     st.warning("Please log in first.")
     st.stop()
 
 render_sidebar()
+inject_styles()
 
 user_id = st.session_state.user_id
 db = DBService()
@@ -38,7 +40,7 @@ if "trainer_index" not in st.session_state:
 if "trainer_revealed" not in st.session_state:
     st.session_state.trainer_revealed = False
 
-if st.button("Load due cards"):
+if st.button("Load due cards", type="primary"):
     st.session_state.trainer_cards = flashcard.get_due_cards(user_id, limit=20)
     st.session_state.trainer_index = 0
     st.session_state.trainer_revealed = False

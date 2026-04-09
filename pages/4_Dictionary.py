@@ -5,16 +5,18 @@ Personal dictionary – browse, search, edit and delete entries.
 """
 import streamlit as st
 from utils.auth_ui import render_sidebar
+from utils.styles import inject_styles
 from domain.vocabulary import VocabularyManager
 from services.db_service import DBService
 
-st.set_page_config(page_title="langDec – Dictionary", layout="centered")
+st.set_page_config(page_title="langDec – Dictionary", layout="wide")
 
 if "user_id" not in st.session_state:
     st.warning("Please log in first.")
     st.stop()
 
 render_sidebar()
+inject_styles()
 
 user_id = st.session_state.user_id
 db = DBService()
@@ -89,7 +91,7 @@ else:
 
             col_save, col_del = st.columns(2)
             with col_save:
-                if st.button("Save", key=f"save_{word['id']}"):
+                if st.button("Save", key=f"save_{word['id']}", type="primary"):
                     vocab.update_word(
                         user_id,
                         str(word["id"]),
@@ -102,6 +104,19 @@ else:
                     st.success("Saved.")
                     st.rerun()
             with col_del:
-                if st.button("Delete", key=f"del_{word['id']}"):
-                    vocab.delete_word(user_id, str(word["id"]))
-                    st.rerun()
+                if st.session_state.get(f"confirm_del_word_{word['id']}"):
+                    st.warning("Are you sure?")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button("Yes, delete", key=f"del_confirm_{word['id']}", type="primary"):
+                            vocab.delete_word(user_id, str(word["id"]))
+                            st.session_state.pop(f"confirm_del_word_{word['id']}", None)
+                            st.rerun()
+                    with c2:
+                        if st.button("Cancel", key=f"del_cancel_{word['id']}"):
+                            st.session_state.pop(f"confirm_del_word_{word['id']}", None)
+                            st.rerun()
+                else:
+                    if st.button("Delete", key=f"del_{word['id']}"):
+                        st.session_state[f"confirm_del_word_{word['id']}"] = True
+                        st.rerun()

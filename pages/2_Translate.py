@@ -5,35 +5,19 @@ import streamlit as st
 
 from utils.auth_ui import render_sidebar
 from utils.services_ui import get_translate_service
+from utils.styles import inject_styles, inject_translated_style
+from utils.ui import LANGUAGES
 from domain.translator import Translator
 
-st.set_page_config(page_title="langDec – Translate", layout="centered")
+st.set_page_config(page_title="langDec – Translate", layout="wide")
 
 if "user_id" not in st.session_state:
     st.warning("Please log in first.")
     st.stop()
 
 render_sidebar()
-
-LANGUAGES = {
-    "German (de)": "de",
-    "English (en)": "en",
-    "Portuguese (pt)": "pt",
-}
-
-st.markdown(
-    """
-    <style>
-      h1 { font-size: 1.8rem !important; margin-top: 0.5rem !important; margin-bottom: 0.3rem !important; }
-      textarea { font-family: "Courier New", Courier, monospace !important; font-size: 14px !important; line-height: 1.35 !important; }
-      button[kind="primary"] { background-color: #007bff !important; border-color: #007bff !important; }
-      button[kind="primary"]:hover { background-color: #0056b3 !important; border-color: #004085 !important; }
-      textarea[aria-label="Translated text (natural translation)"] { background-color: #d1ecf1 !important; color: black !important; }
-      .stDownloadButton > button { background-color: white !important; border: 1px solid #cccccc !important; color: black !important; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+inject_styles()
+inject_translated_style()
 
 st.title("Translate")
 
@@ -58,6 +42,8 @@ with col_right:
 source_language = LANGUAGES[source_label]
 target_language = LANGUAGES[target_label]
 
+if "input_text" not in st.session_state:
+    st.session_state.input_text = ""
 if "translated_text" not in st.session_state:
     st.session_state.translated_text = ""
 
@@ -74,11 +60,11 @@ if source_language == target_language:
     st.warning("Source and target language are identical.")
 
 # --- Buttons ---
-btn_col1, btn_col2 = st.columns(2)
+btn_col1, btn_col2 = st.columns([3, 1])
 with btn_col1:
     translate_clicked = st.button("Translate", type="primary", use_container_width=True)
 with btn_col2:
-    if st.button("← Jump to Decode", use_container_width=True):
+    if st.button("← Decode"):
         st.session_state.transfer_source_label = source_label
         st.session_state.transfer_target_label = target_label
         st.switch_page("pages/1_Decode.py")
@@ -88,7 +74,7 @@ _translator = Translator(get_translate_service())
 # --- Translate logic ---
 if translate_clicked:
     try:
-        with st.spinner("Translating..."):
+        with st.spinner("Translating…"):
             st.session_state.translated_text = _translator.translate(
                 text=input_text.strip(),
                 source_lang=source_language,
@@ -100,7 +86,27 @@ if translate_clicked:
         st.session_state.translated_text = ""
 
 # --- Output ---
-st.text_area("Translated text (natural translation)", value=st.session_state.translated_text, height=220, help="Select and copy (Ctrl/Cmd + C).")
+if st.session_state.translated_text:
+    col_title, col_toggle = st.columns([2, 1])
+    with col_title:
+        st.markdown("#### 🌐 Translation (natural)")
+    with col_toggle:
+        trans_view = st.radio(
+            "View",
+            ["Edit Text", "Read Markdown"],
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+    if trans_view == "Read Markdown":
+        st.markdown(st.session_state.translated_text)
+    else:
+        st.text_area(
+            "Translated text (natural translation)",
+            value=st.session_state.translated_text,
+            height=220,
+            label_visibility="collapsed",
+            help="Select and copy (Ctrl/Cmd + C).",
+        )
 
 # --- Download ---
 st.download_button(

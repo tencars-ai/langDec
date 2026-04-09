@@ -1,13 +1,10 @@
 # Enable modern type hints (allows referencing class names before definition)
 from __future__ import annotations
 
-# dataclass: Automatically generates __init__, __repr__, etc. based on class attributes
+import concurrent.futures
 from dataclasses import dataclass
-# List: Type hint for lists, e.g., List[str] means "a list of strings"
 from typing import List
 
-# Import from services → translation_service module
-# TranslationService is the interface (Protocol) for translation providers
 from services.translation_service import TranslationService
 
 
@@ -38,7 +35,7 @@ class TokenPair:
         Example: "hello" (5) and "hallo" (5) → returns 5
                  "hi" (2) and "hallo" (5) → returns 5
         """
-        return max(len(self.source_token), len(self.target_token))
+        return max(len(self.source_token or ""), len(self.target_token or ""))
 
 
 class WordByWordDecoder:
@@ -95,41 +92,46 @@ class WordByWordDecoder:
         target_lang: str,
         max_line_length: int,
     ) -> DecoderResult:
-        """Batch path: one LLM call per non-empty line."""
-        decoded_lines = []
-        all_comments = []
+        """Batch path: all non-empty lines dispatched in parallel, one LLM call each."""
+        raw_lines = text.split("\n")
+        non_empty = [(i, line.strip()) for i, line in enumerate(raw_lines) if line.strip()]
 
-        for line in text.split("\n"):
-            line = line.strip()
+        # Dispatch all lines concurrently (I/O-bound LLM calls → threads work well).
+        line_results: dict[int, dict] = {}
+        all_comments: list[str] = []
+
+        max_workers = min(len(non_empty), 8)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_idx = {
+                executor.submit(
+                    self.translation_service.translate_birkenbihl, line, source_lang, target_lang
+                ): i
+                for i, line in non_empty
+            }
+            for future in concurrent.futures.as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    line_results[idx] = future.result()
+                except Exception as exc:
+                    all_comments.append(f"[Line {idx + 1} error: {exc}]")
+                    line_results[idx] = {"words": [], "comments": ""}
+
+        decoded_lines = []
+        for i, raw_line in enumerate(raw_lines):
+            line = raw_line.strip()
             if not line:
                 decoded_lines.append("")
                 continue
-
+            result = line_results[i]
             tokens = self._tokenize(line)
-            try:
-                result = self.translation_service.translate_birkenbihl(
-                    line, source_lang, target_lang
-                )
-                translated_words = result.get("words", [])
-                comments = result.get("comments", "")
-                if comments:
-                    all_comments.append(comments)
-                pairs = [
-                    TokenPair(source_token=src, target_token=tgt)
-                    for src, tgt in zip(tokens, translated_words)
-                ]
-            except Exception as exc:
-                all_comments.append(f"[Batch error: {exc} — fell back to per-word]")
-                pairs = []
-                for token in tokens:
-                    try:
-                        translated = self.translation_service.translate_word(
-                            token, source_lang=source_lang, target_lang=target_lang
-                        )
-                    except Exception as inner_exc:
-                        translated = f"[ERR:{inner_exc}]"
-                    pairs.append(TokenPair(source_token=token, target_token=translated))
-
+            translated_words = result.get("words", [])
+            comments = result.get("comments", "")
+            if comments:
+                all_comments.append(comments)
+            pairs = [
+                TokenPair(source_token=src, target_token=tgt)
+                for src, tgt in zip(tokens, translated_words)
+            ]
             decoded_lines.append(self._format_aligned(pairs, max_line_length=max_line_length))
 
         return DecoderResult(
@@ -199,7 +201,7 @@ class WordByWordDecoder:
                 # Call the translation service to translate this word
                 translated = self.translation_service.translate_word(
                     token, source_lang=source_lang, target_lang=target_lang
-                )
+                ) or token
             except Exception as exc:
                 # If translation fails, use an error message instead
                 # f"..." is an f-string: formats the exception into the string

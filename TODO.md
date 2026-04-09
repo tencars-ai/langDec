@@ -52,19 +52,51 @@
 
 ---
 
-### To-be-checked later
--[ ] Datenmodell gg. anpassen. Pro Trabelle sprechende ID. email als unique identifier und mandatory.
+### Datenbank
+-[ ]! Datenmodell gg. anpassen. Pro Trabelle sprechende ID. email als unique identifier und mandatory.
+-[ ] Data Modeler Agent erstellen und rüber schauen lassen
+
+### Texfelder
 -[ ] Spellcorrection ausschalen oder entsprechen der sprache durchfüreh (rote kringellinien)
--[ ] translator und decoder in 2 verschiedene menüpunkte unterteilen
+
+
+### Bugs
 -[ ] wenn ich ausgeloggt bin bleibt die aktuelle seite ohne login button
--[ ] keine Rückmeldung wenn Folder angelegt wurde, und sieht man irgendwo die folder?
--[ ] decoder algorithmus ggf. anpassen, dass der ganze text und nicht einzelne wörter vergleichen werden.
--[ ] abfangen wenn der Text leer ist, nicht sagen es sei komplett
--[ ] text und md files erlauben
--[ ] beim speichern solle man auch den Folder wählen können
--[ ] erklärungen, naming, vision, help editieren und birkenbihl nicht zu prominent platzieren. all in one, from zero to hero, build your own Wortschatz.
+-[ ] ! abfangen wenn der Text leer ist, nicht sagen es sei komplett
+
+### Folder
+-[ ] !! keine Rückmeldung wenn Folder angelegt wurde, und sieht man irgendwo die folder?
+
+### Key Feature im neuen Test
+-[ ]!!! decoder algorithmus ggf. anpassen, dass der ganze text und nicht einzelne wörter vergleichen werden.
+
+### Dictionary und Vokabeltrainer
+-[ ] dictionary füllt sich automatisch mit dem was man je übersetzt hat. konzept wie es sich füllt, welche infos stehen denn dann drin?
+-[ ] vokabeltrainer übernimmt man wöter die man lernen will, oder es werden einem wörter aus dem häufig verwendeten übersetzungen vorgeschlagen. so bekommt man auch immer mehr beispielsätze / kontext in dem man das wort schon verwendet hat. sind das dann nur markierungen der wörter im dictonary? werden die texte dann mit den wörtern verknüpft um beispieltexte zu haben, oder wie machen wir das? Speichern wir sätze einzelnt und verknüpfen diese mit den Wötern? konzept bzw. ausprobieren.
 
 ## Remaining / Future
+
+## Design
+- [ ] Designvorgaben zentral und z.B. alle Buttons blau
+- [ ] als MD und als Text anzeigen
+- [ ] verspiele Icons oder schlichtes Design, beides testen oder umschaltbar
+ 
+
+## übergreifende Features
+- [ ] Immer als Text speichern und als MD anzeigen, bzw. Modus switchen können
+- [ ] immer den Ordner beim Speichern wählen könnnen
+
+
+## User Story Map / Requirements
+-[ ] !! erklärungen, naming, vision, help editieren und birkenbihl nicht zu prominent platzieren. all in one, from zero to hero, build your own Wortschatz.
+- [ ] Was will der Nutzer eingentlich mindestens
+- [ ] translator und decoder in 2 verschiedene menüpunkte unterteilen, ggf. braucht es doch nur den einen kompinieten modus
+- [ ] beim output des translators bitte auch markdown nutzen. beim generate text auch immer den prompt mitspeicher. und auch immer den urspünglichen text speichern. Wahrscheinlich sollte jeder Text mehrere spalten in der datenbank baben. urspung, decode, translate, ...
+
+
+
+## Config
+- [ ] Modelle für einzelne Module konfigurierbar machen
 
 ### Near-term
 - [ ] CSV import/export for vocabulary

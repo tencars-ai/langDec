@@ -8,38 +8,22 @@ import fitz
 
 from utils.auth_ui import render_sidebar
 from utils.services_ui import get_decode_service, get_max_line_length, get_ocr_threshold
+from utils.styles import inject_styles, inject_decoded_style
+from utils.ui import LANGUAGES, save_to_library
 from domain.decoder import WordByWordDecoder
 from domain.vocabulary import VocabularyManager
 from services.ocr_service import EasyOCRService
 from services.db_service import DBService
 
-st.set_page_config(page_title="langDec – Decode", layout="centered")
+st.set_page_config(page_title="langDec – Decode", layout="wide")
 
 if "user_id" not in st.session_state:
     st.warning("Please log in first.")
     st.stop()
 
 render_sidebar()
-
-LANGUAGES = {
-    "German (de)": "de",
-    "English (en)": "en",
-    "Portuguese (pt)": "pt",
-}
-
-st.markdown(
-    """
-    <style>
-      h1 { font-size: 1.8rem !important; margin-top: 0.5rem !important; margin-bottom: 0.3rem !important; }
-      textarea { font-family: "Courier New", Courier, monospace !important; font-size: 14px !important; line-height: 1.35 !important; }
-      button[kind="primary"] { background-color: #007bff !important; border-color: #007bff !important; color: white !important; }
-      button[kind="primary"]:hover { background-color: #0056b3 !important; border-color: #004085 !important; }
-      textarea[aria-label="Decoded text (word-by-word)"] { background-color: #d4edda !important; color: black !important; }
-      .stDownloadButton > button { background-color: white !important; border: 1px solid #cccccc !important; color: black !important; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+inject_styles()
+inject_decoded_style()
 
 st.title("Decode")
 
@@ -62,6 +46,10 @@ for key in ("input_text", "decoded_text", "decoder_comments"):
 for key in ("show_camera", "show_browse"):
     if key not in st.session_state:
         st.session_state[key] = False
+
+_decoder = WordByWordDecoder(get_decode_service())
+ocr_line_height_threshold = get_ocr_threshold()
+max_line_length = get_max_line_length()
 
 st.markdown("**Input Text**")
 ocr_col1, ocr_col2 = st.columns(2)
@@ -127,37 +115,42 @@ if source_language == target_language:
     st.warning("Source and target language are identical.")
 
 # --- Buttons ---
-btn_col1, btn_col2 = st.columns(2)
+btn_col1, btn_col2 = st.columns([3, 1])
 with btn_col1:
     decode_clicked = st.button("Decode", type="primary", use_container_width=True)
 with btn_col2:
-    if st.button("Jump to Translate →", use_container_width=True):
+    if st.button("Translate →"):
         st.session_state.transfer_source_label = source_label
         st.session_state.transfer_target_label = target_label
         st.switch_page("pages/2_Translate.py")
 
-_decoder = WordByWordDecoder(get_decode_service())
-ocr_line_height_threshold = get_ocr_threshold()
-max_line_length = get_max_line_length()
-
 # --- Auto-save decoded words ---
 def _save_decoded_words(decoded: str, src_lang: str, tgt_lang: str) -> None:
+    """Parse aligned two-line output and save word pairs to the dictionary.
+    Format per block:
+        hello  world
+        hallo  Welt
+    Blocks are separated by blank lines.
+    """
     try:
         vocab = VocabularyManager(DBService())
-        for token in decoded.split():
-            if "/" in token:
-                parts = token.split("/", 1)
-                if len(parts) == 2:
-                    w_src, w_tgt = parts[0].strip(), parts[1].strip()
-                    if w_src and w_tgt:
-                        vocab.add_word(st.session_state.user_id, w_src, w_tgt, src_lang, tgt_lang)
+        for block in decoded.split("\n\n"):
+            lines = [l for l in block.splitlines() if l.strip()]
+            if len(lines) < 2:
+                continue
+            src_words = lines[0].split()
+            tgt_words = lines[1].split()
+            for w_src, w_tgt in zip(src_words, tgt_words):
+                w_src, w_tgt = w_src.strip(), w_tgt.strip()
+                if w_src and w_tgt:
+                    vocab.add_word(st.session_state.user_id, w_src, w_tgt, src_lang, tgt_lang)
     except Exception:
         pass
 
 # --- Decode logic ---
 if decode_clicked:
     try:
-        with st.spinner("Decoding..."):
+        with st.spinner("Decoding…"):
             _result = _decoder.decode(
                 text=input_text.strip(),
                 source_lang=source_language,
@@ -174,25 +167,23 @@ if decode_clicked:
         st.session_state.decoder_comments = ""
 
 # --- Output ---
-st.text_area("Decoded text (word-by-word)", value=st.session_state.decoded_text, height=220, help="Select and copy (Ctrl/Cmd + C).")
+if st.session_state.decoded_text:
+    st.markdown("#### 🔤 Decoded text (word-by-word)")
+st.text_area("Decoded text (word-by-word)", value=st.session_state.decoded_text, height=220, label_visibility="collapsed", help="Select and copy (Ctrl/Cmd + C).")
 if st.session_state.get("decoder_comments"):
-    st.markdown("**Notes from translation:**")
+    st.markdown("#### 📝 Notes")
     st.info(st.session_state.decoder_comments)
 
 # --- Save to text library ---
 if st.session_state.decoded_text:
-    with st.expander("Save to text library", expanded=False):
-        title = st.text_input("Title", value="Untitled text")
-        if st.button("Save text", type="primary"):
-            if title.strip():
-                try:
-                    DBService().execute_returning(
-                        "INSERT INTO texts (user_id, title, content, source_language) VALUES (%s, %s, %s, %s) RETURNING id",
-                        (st.session_state.user_id, title.strip(), input_text.strip(), source_language),
-                    )
-                    st.success(f"Saved as '{title}'.")
-                except Exception as e:
-                    st.error(f"Failed: {e}")
+    save_to_library(
+        input_text.strip(),
+        source_language,
+        st.session_state.user_id,
+        key_prefix="decode_save",
+        decoded_text=st.session_state.decoded_text,
+        target_language=target_language,
+    )
 
 # --- Download ---
 _download_content = st.session_state.decoded_text or ""

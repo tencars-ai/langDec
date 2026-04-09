@@ -6,7 +6,7 @@ Default page after login: Decode.
 """
 import streamlit as st
 
-st.set_page_config(page_title="langDec", layout="centered")
+st.set_page_config(page_title="langDec", layout="wide")
 
 # -------------------------------------------------------
 # Navigation definition (only shown when logged in)

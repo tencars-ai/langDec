@@ -20,6 +20,15 @@ Define a pragmatic technology stack for the **first prototype** of the language 
   - Very fast construction of clickable interfaces in Python
   - Ideal for early validation of core features (OCR → text management → translation/decoder → audio/playlist → vocabulary)
 
+#### UI Styling
+- Global theme configured in `.streamlit/config.toml`: `primaryColor = #1A73E8`, `font = sans serif`
+- Shared CSS injected via `utils/styles.py` → `inject_styles()` (called on every page)
+- **Textarea font: `"Consolas", "Courier New", monospace`** — monospace is required for the decoded
+  output so that word/translation pairs remain vertically aligned when displayed line by line.
+  UI controls (buttons, labels, inputs) use the system sans-serif font from the theme.
+- Page-specific tints: decoded output `#F0F7F0`, translated output `#EEF4FB`
+- Download buttons styled neutral (white, `#DADCE0` border) to distinguish from primary actions
+
 ### 3.2 Database
 - **PostgreSQL** as primary database
 - Rationale:

@@ -49,6 +49,9 @@ CREATE TABLE IF NOT EXISTS texts (
     title VARCHAR(255) NOT NULL,
     content TEXT NOT NULL,
     source_language VARCHAR(10) NOT NULL,   -- 'pt', 'en', 'de'
+    target_language VARCHAR(10),            -- 'pt', 'en', 'de'
+    decoded_text TEXT,
+    translated_text TEXT,
     notes TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );

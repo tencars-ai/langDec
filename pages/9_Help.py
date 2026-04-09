@@ -3,14 +3,16 @@ Help page – overview of the app and the Birkenbihl method.
 """
 import streamlit as st
 from utils.auth_ui import render_sidebar
+from utils.styles import inject_styles
 
-st.set_page_config(page_title="langDec – Help", layout="centered")
+st.set_page_config(page_title="langDec – Help", layout="wide")
 
 if "user_id" not in st.session_state:
     st.warning("Please log in first.")
     st.stop()
 
 render_sidebar()
+inject_styles()
 
 st.title("Help")
 

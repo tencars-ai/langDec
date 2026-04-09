@@ -3,30 +3,34 @@ Audio page – TTS playback, MP3 save per user, list saved audio.
 """
 import streamlit as st
 from utils.auth_ui import render_sidebar
+from utils.styles import inject_styles
+from utils.ui import LANGUAGES
 from services.tts_service import GTTSService
 from services.audio_storage_service import AudioStorageService
 from services.db_service import DBService
 
-st.set_page_config(page_title="langDec – Audio", layout="centered")
+st.set_page_config(page_title="langDec – Audio", layout="wide")
 
 if "user_id" not in st.session_state:
     st.warning("Please log in first.")
     st.stop()
 
 render_sidebar()
+inject_styles()
 
 user_id = st.session_state.user_id
+
+if "audio_text_input" not in st.session_state:
+    st.session_state.audio_text_input = ""
 db = DBService()
 audio_storage = AudioStorageService(db)
 tts = GTTSService()
 
-st.title("Audio / TTS")
-
-LANGUAGES = {"German (de)": "de", "English (en)": "en", "Portuguese (pt)": "pt"}
+st.title("Audio")
 
 # --- Generate audio ---
 st.subheader("Generate audio")
-text_input = st.text_area("Text to synthesize", height=150, placeholder="Paste or type your text here…")
+text_input = st.text_area("Text to synthesize", height=150, placeholder="Paste or type your text here…", key="audio_text_input")
 lang_label = st.selectbox("Language", list(LANGUAGES.keys()))
 language = LANGUAGES[lang_label]
 
@@ -88,6 +92,19 @@ else:
                         key=f"dl_{af['id']}",
                     )
             with col_c:
-                if st.button("Delete", key=f"del_{af['id']}"):
-                    audio_storage.delete(str(af["id"]), user_id)
-                    st.rerun()
+                if st.session_state.get(f"confirm_del_audio_{af['id']}"):
+                    st.warning("Are you sure?")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button("Yes", key=f"del_confirm_{af['id']}", type="primary"):
+                            audio_storage.delete(str(af["id"]), user_id)
+                            st.session_state.pop(f"confirm_del_audio_{af['id']}", None)
+                            st.rerun()
+                    with c2:
+                        if st.button("Cancel", key=f"del_cancel_{af['id']}"):
+                            st.session_state.pop(f"confirm_del_audio_{af['id']}", None)
+                            st.rerun()
+                else:
+                    if st.button("Delete", key=f"del_{af['id']}"):
+                        st.session_state[f"confirm_del_audio_{af['id']}"] = True
+                        st.rerun()

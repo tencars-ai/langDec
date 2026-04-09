@@ -3,15 +3,17 @@ Generate page – LLM text/dialogue generation, save to text library.
 """
 import streamlit as st
 from utils.auth_ui import render_sidebar
-from services.db_service import DBService
+from utils.styles import inject_styles
+from utils.ui import LANGUAGES, save_to_library
 
-st.set_page_config(page_title="langDec – Generate", layout="centered")
+st.set_page_config(page_title="langDec – Generate", layout="wide")
 
 if "user_id" not in st.session_state:
     st.warning("Please log in first.")
     st.stop()
 
 render_sidebar()
+inject_styles()
 
 user_id = st.session_state.user_id
 llm = st.session_state.get("llm_service")
@@ -21,8 +23,6 @@ st.title("Generate Texts")
 if llm is None:
     st.warning("No LLM API key configured. Go to Settings to add your OpenAI or Anthropic key.")
     st.stop()
-
-LANGUAGES = {"German (de)": "de", "English (en)": "en", "Portuguese (pt)": "pt"}
 DIFFICULTIES = ["beginner", "intermediate", "advanced"]
 FORMATS = ["short text", "dialogue", "story", "news article", "poem"]
 
@@ -34,12 +34,12 @@ with col2:
 with col3:
     fmt = st.selectbox("Format", FORMATS)
 
-topic = st.text_input("Topic / prompt", placeholder="e.g. 'ordering food at a restaurant'")
-
-generate_btn = st.button("Generate", type="primary", use_container_width=True)
-
+if "gen_topic" not in st.session_state:
+    st.session_state.gen_topic = ""
 if "generated_text" not in st.session_state:
     st.session_state.generated_text = ""
+
+topic = st.text_input("Topic / prompt", placeholder="e.g. 'ordering food at a restaurant'", key="gen_topic")
 
 if generate_btn:
     if not topic.strip():
@@ -56,17 +56,26 @@ if generate_btn:
 
 if st.session_state.generated_text:
     st.markdown("---")
-    st.subheader("Generated text")
-    st.text_area("Result", value=st.session_state.generated_text, height=300, label_visibility="collapsed")
+    col_title, col_toggle = st.columns([2, 1])
+    with col_title:
+        st.subheader("Generated text")
+    with col_toggle:
+        view_mode = st.radio(
+            "View",
+            ["Edit Text", "Read Markdown"],
+            horizontal=True,
+            label_visibility="collapsed",
+        )
 
-    with st.expander("Save to text library", expanded=False):
-        db = DBService()
-        title = st.text_input("Title", value=f"Generated: {topic[:40]}", key="gen_save_title")
-        lang_save = LANGUAGES[lang_label]
-        if st.button("Save", type="primary"):
-            if title.strip():
-                db.execute_write(
-                    "INSERT INTO texts (user_id, title, content, source_language) VALUES (%s, %s, %s, %s)",
-                    (user_id, title.strip(), st.session_state.generated_text, lang_save),
-                )
-                st.success(f"Saved as '{title}'.")
+    if view_mode == "Read Markdown":
+        st.markdown(st.session_state.generated_text)
+    else:
+        st.text_area("Result", value=st.session_state.generated_text, height=300, label_visibility="collapsed")
+
+    save_to_library(
+        st.session_state.generated_text,
+        LANGUAGES[lang_label],
+        user_id,
+        default_title=f"Generated: {topic[:40]}",
+        key_prefix="gen_save",
+    )
