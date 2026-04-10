@@ -2,7 +2,7 @@
 Audio page – TTS playback, MP3 save per user, list saved audio.
 """
 import streamlit as st
-from utils.auth_ui import render_sidebar
+from utils.auth_ui import require_login, render_sidebar
 from utils.styles import inject_styles
 from utils.ui import LANGUAGES
 from services.tts_service import GTTSService
@@ -11,10 +11,7 @@ from services.db_service import DBService
 
 st.set_page_config(page_title="langDec – Audio", layout="wide")
 
-if "user_id" not in st.session_state:
-    st.warning("Please log in first.")
-    st.stop()
-
+require_login()
 render_sidebar()
 inject_styles()
 

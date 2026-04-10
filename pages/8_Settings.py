@@ -2,7 +2,7 @@
 Settings page – API key management, password change, account deletion.
 """
 import streamlit as st
-from utils.auth_ui import render_sidebar
+from utils.auth_ui import require_login, render_sidebar
 from utils.styles import inject_styles
 from services.db_service import DBService
 from services.auth_service import AuthService
@@ -10,10 +10,7 @@ from services.llm_service import build_llm_service
 
 st.set_page_config(page_title="langDec – Settings", layout="wide")
 
-if "user_id" not in st.session_state:
-    st.warning("Please log in first.")
-    st.stop()
-
+require_login()
 render_sidebar()
 inject_styles()
 

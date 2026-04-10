@@ -7,27 +7,25 @@ from PIL import Image
 import io
 import fitz
 
-from utils.auth_ui import render_sidebar
+from utils.auth_ui import require_login, render_sidebar
 from utils.services_ui import get_decode_service, get_translate_service, get_max_line_length, get_ocr_threshold
-from utils.styles import inject_styles
+from utils.styles import inject_styles, inject_spellcheck_off
 from utils.ui import LANGUAGES, save_to_library
 from domain.decoder import WordByWordDecoder
 from domain.translator import Translator
-from domain.vocabulary import VocabularyManager
+# from domain.vocabulary import VocabularyManager  # MVP-01: dictionary disabled
 from services.ocr_service import EasyOCRService
 from services.tts_service import GTTSService
-from services.db_service import DBService
+# from services.db_service import DBService  # MVP-01: only used by dictionary code
 
-st.set_page_config(page_title="langDec – Start", layout="wide")
+st.set_page_config(page_title="langDec – Decode Text", layout="wide")
 
-if "user_id" not in st.session_state:
-    st.warning("Please log in first.")
-    st.stop()
-
+require_login()
 render_sidebar()
 inject_styles()
+inject_spellcheck_off()
 
-st.title("Start")
+st.title("Decode Text")
 
 _ocr_service = EasyOCRService()
 
@@ -121,28 +119,22 @@ if source_language == target_language:
 
 decode_translate_clicked = st.button("Decode & Translate", type="primary", use_container_width=True)
 
-# --- Auto-save decoded words ---
-def _save_decoded_words(decoded: str, src_lang: str, tgt_lang: str) -> None:
-    """Parse aligned two-line output and save word pairs to the dictionary.
-    Format per block:
-        hello  world
-        hallo  Welt
-    Blocks are separated by blank lines.
-    """
-    try:
-        vocab = VocabularyManager(DBService())
-        for block in decoded.split("\n\n"):
-            lines = [l for l in block.splitlines() if l.strip()]
-            if len(lines) < 2:
-                continue
-            src_words = lines[0].split()
-            tgt_words = lines[1].split()
-            for w_src, w_tgt in zip(src_words, tgt_words):
-                w_src, w_tgt = w_src.strip(), w_tgt.strip()
-                if w_src and w_tgt:
-                    vocab.add_word(st.session_state.user_id, w_src, w_tgt, src_lang, tgt_lang)
-    except Exception:
-        pass
+# --- Auto-save decoded words (MVP-01: dictionary disabled) ---
+# def _save_decoded_words(decoded: str, src_lang: str, tgt_lang: str) -> None:
+#     try:
+#         vocab = VocabularyManager(DBService())
+#         for block in decoded.split("\n\n"):
+#             lines = [l for l in block.splitlines() if l.strip()]
+#             if len(lines) < 2:
+#                 continue
+#             src_words = lines[0].split()
+#             tgt_words = lines[1].split()
+#             for w_src, w_tgt in zip(src_words, tgt_words):
+#                 w_src, w_tgt = w_src.strip(), w_tgt.strip()
+#                 if w_src and w_tgt:
+#                     vocab.add_word(st.session_state.user_id, w_src, w_tgt, src_lang, tgt_lang)
+#     except Exception:
+#         pass
 
 # --- Output slots: populated live during processing or from session state on re-renders ---
 _decoded_slot = st.empty()
@@ -177,7 +169,7 @@ if decode_translate_clicked:
                             _r = _future.result()
                             st.session_state.start_decoded = _r.aligned_text
                             st.session_state.start_comments = _r.comments
-                            _save_decoded_words(_r.aligned_text, source_language, target_language)
+                            # _save_decoded_words(_r.aligned_text, source_language, target_language)  # MVP-01: dictionary disabled
                             st.write("✅ Decoding done")
                             with _decoded_slot.container():
                                 st.markdown("#### 🔤 Decoding (word-by-word)")
@@ -268,60 +260,9 @@ if st.session_state.start_output:
         audio_bytes=st.session_state.start_audio,
     )
 
-# --- Add word/phrase to vocabulary ---
-with st.expander("Add word or phrase to vocabulary", expanded=False):
-    st.caption("Copy a word or phrase from the output above and paste it here.")
-
-    vocab_word = st.text_input("Word / phrase (source language)", key="vocab_word_input")
-
-    col_t1, col_t2 = st.columns(2)
-    with col_t1:
-        vocab_translation = st.text_input("Natural translation", key="vocab_trans_input",
-                                          help="Contextual/natural translation in your mother tongue")
-    with col_t2:
-        vocab_decoded = st.text_input("Decoded translation", key="vocab_decoded_input",
-                                      help="Literal word-for-word translation (Birkenbihl)")
-
-    if st.button("Auto-translate both", key="vocab_autotrans_btn"):
-        if vocab_word.strip():
-            try:
-                natural = get_translate_service().translate_word(vocab_word.strip(), source_language, target_language)
-                decoded = get_decode_service().translate_word(vocab_word.strip(), source_language, target_language)
-                st.session_state.vocab_trans_input = natural
-                st.session_state.vocab_decoded_input = decoded
-                st.rerun()
-            except Exception as e:
-                st.error(f"Auto-translate failed: {e}")
-
-    col_w1, col_w2 = st.columns(2)
-    with col_w1:
-        word_class_options = ["", "noun", "verb", "adjective", "adverb", "phrase", "other"]
-        word_class = st.selectbox("Word class", word_class_options, key="vocab_class_input")
-    with col_w2:
-        example = st.text_input("Example sentence", key="vocab_example_input")
-
-    explanation = st.text_area("Explanation / notes", height=60, key="vocab_explanation_input")
-
-    if st.button("Save to dictionary", type="primary", key="vocab_save_btn"):
-        if vocab_word.strip() and vocab_translation.strip():
-            try:
-                from domain.vocabulary import VocabularyManager
-                VocabularyManager(DBService()).add_word(
-                    user_id=st.session_state.user_id,
-                    word_source=vocab_word.strip(),
-                    word_target=vocab_translation.strip(),
-                    word_target_decoded=vocab_decoded.strip() or None,
-                    lang_source=source_language,
-                    lang_target=target_language,
-                    word_class=word_class or None,
-                    example_sentence=example.strip() or None,
-                    explanation=explanation.strip() or None,
-                )
-                st.success(f"'{vocab_word}' saved to dictionary.")
-            except Exception as e:
-                st.error(f"Failed: {e}")
-        else:
-            st.warning("Please enter at least the word and natural translation.")
+# --- Add word/phrase to vocabulary (MVP-01: dictionary disabled) ---
+# with st.expander("Add word or phrase to vocabulary", expanded=False):
+#     ...  # Re-enable in MVP-02
 
 # --- Download ---
 st.download_button(

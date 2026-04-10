@@ -47,6 +47,15 @@ class AudioStorageService:
         )
         return bytes(row["data"]) if row else None
 
+    def get_by_text_id(self, text_id: str, user_id: str) -> Optional[bytes]:
+        """Retrieve the latest MP3 bytes for a given text, scoped to user_id."""
+        row = self._db.execute_one(
+            "SELECT data FROM audio_files WHERE text_id = %s AND user_id = %s "
+            "ORDER BY created_at DESC LIMIT 1",
+            (text_id, user_id),
+        )
+        return bytes(row["data"]) if row else None
+
     def list_for_user(self, user_id: str) -> list[dict]:
         """
         List all audio file metadata for a user (no binary data).

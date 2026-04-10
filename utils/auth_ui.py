@@ -4,6 +4,15 @@ Shared sidebar UI – call render_sidebar() at the top of every page.
 import streamlit as st
 
 
+def require_login() -> None:
+    """Show login prompt with navigation button and stop if user is not logged in."""
+    if "user_id" not in st.session_state:
+        st.warning("Please log in first.")
+        if st.button("Go to Login", type="primary"):
+            st.switch_page("app.py")
+        st.stop()
+
+
 def render_sidebar() -> None:
     """Render the sidebar with user info and logout button."""
     with st.sidebar:

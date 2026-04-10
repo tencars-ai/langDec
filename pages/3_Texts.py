@@ -2,24 +2,28 @@
 Text library – browse folders, save and load texts.
 """
 import streamlit as st
-from utils.auth_ui import render_sidebar
-from utils.styles import inject_styles
+from utils.auth_ui import require_login, render_sidebar
+from utils.styles import inject_styles, inject_spellcheck_off
 from utils.ui import LANGUAGES, save_to_library
 from services.db_service import DBService
+from services.audio_storage_service import AudioStorageService
 
-st.set_page_config(page_title="langDec – Texts", layout="wide")
+st.set_page_config(page_title="langDec – Text Library", layout="wide")
 
-if "user_id" not in st.session_state:
-    st.warning("Please log in first.")
-    st.stop()
-
+require_login()
 render_sidebar()
 inject_styles()
+inject_spellcheck_off()
 
 user_id = st.session_state.user_id
 db = DBService()
+audio_svc = AudioStorageService(db)
 
 st.title("Text Library")
+
+# --- Flash messages ---
+if "_folder_flash" in st.session_state:
+    st.success(st.session_state.pop("_folder_flash"))
 
 # --- Toolbar: New folder + Add text ---
 col_a, col_b = st.columns(2)
@@ -32,7 +36,7 @@ with col_a:
                     "INSERT INTO folders (user_id, name) VALUES (%s, %s)",
                     (user_id, folder_name.strip()),
                 )
-                st.success(f"Folder '{folder_name}' created.")
+                st.session_state["_folder_flash"] = f"Folder '{folder_name}' created."
                 st.rerun()
 
 with col_b:
@@ -110,37 +114,52 @@ else:
                         expanded=False,
                     ):
                         full = db.execute_one(
-                            "SELECT content, decoded_text, translated_text FROM texts WHERE id = %s",
+                            "SELECT content, decoded_text, translated_text, notes FROM texts WHERE id = %s",
                             (str(text["id"]),),
                         )
                         content_val = (full["content"] or "") if full else ""
                         decoded_val = (full["decoded_text"] or "") if full else ""
                         translated_val = (full["translated_text"] or "") if full else ""
+                        notes_val = (full["notes"] or "") if full else ""
 
                         tab_labels = ["Original"]
                         if decoded_val:
                             tab_labels.append("Decoded")
                         if translated_val:
                             tab_labels.append("Translation")
+                        if notes_val:
+                            tab_labels.append("Notes")
 
                         tabs = st.tabs(tab_labels)
-                        with tabs[0]:
+                        idx = 0
+                        with tabs[idx]:
                             st.text_area("Content", value=content_val, height=150,
                                          key=f"content_{text['id']}", disabled=True)
                         if decoded_val:
-                            with tabs[1]:
+                            idx += 1
+                            with tabs[idx]:
                                 st.text_area("Decoded", value=decoded_val, height=150,
                                              key=f"decoded_{text['id']}", disabled=True)
                         if translated_val:
-                            with tabs[-1]:
+                            idx += 1
+                            with tabs[idx]:
                                 st.text_area("Translation", value=translated_val, height=150,
                                              key=f"translated_{text['id']}", disabled=True)
+                        if notes_val:
+                            idx += 1
+                            with tabs[idx]:
+                                st.info(notes_val)
+
+                        # Audio playback
+                        audio_data = audio_svc.get_by_text_id(str(text["id"]), user_id)
+                        if audio_data:
+                            st.audio(audio_data, format="audio/mp3")
 
                         col1, col2 = st.columns(2)
                         with col1:
-                            if st.button("Load into Decoder", key=f"load_{text['id']}", type="primary"):
+                            if st.button("Load into Decode Text", key=f"load_{text['id']}", type="primary"):
                                 st.session_state.input_text = content_val
-                                st.switch_page("pages/1_Decode.py")
+                                st.switch_page("pages/0_Start.py")
                         with col2:
                             if st.session_state.get(f"confirm_del_text_{text['id']}"):
                                 st.warning("Are you sure?")

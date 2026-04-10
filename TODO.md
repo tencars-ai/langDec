@@ -24,7 +24,7 @@
 - [x] `services/db_service.py` — connection pool, base queries
 - [x] `services/auth_service.py` — password hash, API key encryption
 - [x] Auth gate in `app.py` (login + register)
-- [ ] Run `sql/schema.sql` against Neon (neon.tech) / local PostgreSQL instance
+- [ ] Run `sql/schema.sql` against Neon (neon.tech) / local PostgreSQL instance / in Prod?
 - [ ] Set `DATABASE_URL` and `SECRET_KEY` in `.streamlit/secrets.toml`
 
 ### Phase 2 – LLM Integration
@@ -52,23 +52,50 @@
 
 ---
 
-### Datenbank
--[ ]! Datenmodell gg. anpassen. Pro Trabelle sprechende ID. email als unique identifier und mandatory.
--[ ] Data Modeler Agent erstellen und rüber schauen lassen
+## MVP-01 Phase
 
+### Branch MVP-01 Database
+-[x] DB-Migration ausführen (Neon SQL Editor):
+  ALTER TABLE texts ADD COLUMN IF NOT EXISTS notes TEXT;
+  (Die anderen 3 Spalten aus Migration 003 solltest du bereits ausgeführt
+  haben.)
+-[ ]! Datenmodell ggf. anpassen. Pro Trabelle sprechende ID. email als unique identifier und mandatory.
+-[ ] Data Modeler Agent das Modell prüfen lassen schauen lassen
+
+
+## Branch MVP-01 Bugs 
 ### Texfelder
--[ ] Spellcorrection ausschalen oder entsprechen der sprache durchfüreh (rote kringellinien)
+-[ ] wenn möglich: Spellcorrection ausschalen oder entsprechen der sprache durchfüreh (rote kringellinien), wahrscheinlich ist das die vom Brownser, kann man gar nicht in der app auschalten, oder? Oder kann man dem browser übermitteln welche sprache es haben soll.
+### Bugs Prio 1
+
+-[ ] ! abfangen wenn der input Text leer ist  und auf decode geklickt wird  nicht sagen es sei komplett
+
+## branch MVP-01 login and logout
+-[ ] wenn ich mich gerade ausgeloggt habe, hat die aktuelle seite keinen login button
+-[ ] login mit einer eindeutigen emailadressse als user
 
 
-### Bugs
--[ ] wenn ich ausgeloggt bin bleibt die aktuelle seite ohne login button
--[ ] ! abfangen wenn der Text leer ist, nicht sagen es sei komplett
-
+## Branch Folder & Menu MVP-01
 ### Folder
 -[ ] !! keine Rückmeldung wenn Folder angelegt wurde, und sieht man irgendwo die folder?
+-[ ] Save in Folder im Decode & Translate direct
+### Menu
+-[ ] die zwei separaten Menüpunkte Decode, Translate auskommentieren, und zunächst nur die Combinierte Variante machen.
+-[ ] vocabel dictonary feature erstmal auskommentieren, im menu "Dictonary" und auch im decode&translate. reaktivieren und verfeinern wir später
+-[ ] genauso wie vokab Trainer auch, auskommenieren und später weiterentwickeln.
+-[ ] audio auch, aber das feature ist be Decode& Translate schon eingebaut. Dort sollte man aber das audio auch absoielen können.
+-[ ] der Start Menu Punkt soll "Decode Text" heißen
+-[ ] der Menüpunkt Texts soll "Text Library" heißen. hier sollten alle texte angezeigt werden können, originalcode. decodiert, translated, notes und auch das audio abspielbar
+- [ ] generate erstzmal auskommenieren.
+- [ ] settings und help bleiben-
+ 
 
-### Key Feature im neuen Test
--[ ]!!! decoder algorithmus ggf. anpassen, dass der ganze text und nicht einzelne wörter vergleichen werden.
+## Branch: Decoding Bugs
+-[ ] Großschreibung von "Und" und "In" mittem im Satz, "No" wird häufig als "Knoten" übersetzt, dabei ist es eine präposition 
+-[ ] sollte schon erledigt sein. Aber bitte vom Architekten Agent nochmal überprüfen lassen. Decoding ist noch recht langsam: decoder algorithmus ggf. anpassen, dass zunächst der Ganze Text im Konext übersetzt wird und dann die einzelnen wörter 1:1 übersetzt zugeordnet werden. 
+
+
+## MVP-02 Phase
 
 ### Dictionary und Vokabeltrainer
 -[ ] dictionary füllt sich automatisch mit dem was man je übersetzt hat. konzept wie es sich füllt, welche infos stehen denn dann drin?

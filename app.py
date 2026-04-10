@@ -12,14 +12,14 @@ st.set_page_config(page_title="langDec", layout="wide")
 # Navigation definition (only shown when logged in)
 # -------------------------------------------------------
 PAGES = [
-    st.Page("pages/0_Start.py",         title="Start",         icon="🚀"),
-    st.Page("pages/1_Decode.py",        title="Decode",        icon="🔤"),
-    st.Page("pages/2_Translate.py",     title="Translate",     icon="🌐"),
-    st.Page("pages/3_Texts.py",         title="Texts",         icon="📚"),
-    st.Page("pages/4_Dictionary.py",    title="Dictionary",    icon="📖"),
-    st.Page("pages/5_Vocab_Trainer.py", title="Vocab Trainer", icon="🃏"),
-    st.Page("pages/6_Audio.py",         title="Audio",         icon="🔊"),
-    st.Page("pages/7_Generate.py",      title="Generate",      icon="✨"),
+    st.Page("pages/0_Start.py",         title="Decode Text",   icon="🚀"),
+    # st.Page("pages/1_Decode.py",        title="Decode",        icon="🔤"),
+    # st.Page("pages/2_Translate.py",     title="Translate",     icon="🌐"),
+    st.Page("pages/3_Texts.py",         title="Text Library",  icon="📚"),
+    # st.Page("pages/4_Dictionary.py",    title="Dictionary",    icon="📖"),
+    # st.Page("pages/5_Vocab_Trainer.py", title="Vocab Trainer", icon="🃏"),
+    # st.Page("pages/6_Audio.py",         title="Audio",         icon="🔊"),
+    # st.Page("pages/7_Generate.py",      title="Generate",      icon="✨"),
     st.Page("pages/8_Settings.py",      title="Settings",      icon="⚙️"),
     st.Page("pages/9_Help.py",          title="Help",          icon="❓"),
 ]
@@ -85,35 +85,35 @@ tab_login, tab_register = st.tabs(["Login", "Register"])
 
 with tab_login:
     with st.form("login_form"):
-        username = st.text_input("Username")
+        login_email = st.text_input("Email")
         password = st.text_input("Password", type="password")
         login_btn = st.form_submit_button("Login", type="primary", use_container_width=True)
 
     if login_btn:
-        if not username.strip() or not password:
-            st.error("Please enter username and password.")
+        if not login_email.strip() or not password:
+            st.error("Please enter email and password.")
         else:
             try:
                 db, auth, build_llm = _get_services()
                 user = db.execute_one(
-                    "SELECT id, password_hash FROM users WHERE username = %s",
-                    (username.strip(),),
+                    "SELECT id, username, password_hash FROM users WHERE email = %s",
+                    (login_email.strip(),),
                 )
                 if user and auth.verify_password(password, user["password_hash"]):
                     st.session_state.user_id = str(user["id"])
-                    st.session_state.username = username.strip()
+                    st.session_state.username = user["username"] or login_email.strip()
                     _load_llm_service(db, auth, build_llm, str(user["id"]))
                     _init_preferences(db, str(user["id"]))
                     st.rerun()
                 else:
-                    st.error("Invalid username or password.")
+                    st.error("Invalid email or password.")
             except Exception as e:
                 st.error(f"Login failed: {e}")
 
 with tab_register:
     with st.form("register_form"):
         new_username = st.text_input("Choose a username", key="reg_user")
-        new_email = st.text_input("Email (optional)", key="reg_email")
+        new_email = st.text_input("Email", key="reg_email")
         new_pw = st.text_input("Password", type="password", key="reg_pw")
         new_pw2 = st.text_input("Confirm password", type="password", key="reg_pw2")
         register_btn = st.form_submit_button("Register", type="primary", use_container_width=True)
@@ -121,6 +121,10 @@ with tab_register:
     if register_btn:
         if not new_username.strip():
             st.error("Username is required.")
+        elif not new_email.strip():
+            st.error("Email is required.")
+        elif "@" not in new_email:
+            st.error("Please enter a valid email address.")
         elif len(new_pw) < 8:
             st.error("Password must be at least 8 characters.")
         elif new_pw != new_pw2:
@@ -128,21 +132,27 @@ with tab_register:
         else:
             try:
                 db, auth, build_llm = _get_services()
-                existing = db.execute_one(
+                existing_user = db.execute_one(
                     "SELECT id FROM users WHERE username = %s", (new_username.strip(),)
                 )
-                if existing:
+                if existing_user:
                     st.error("Username already taken.")
                 else:
-                    pw_hash = auth.hash_password(new_pw)
-                    user = db.execute_returning(
-                        "INSERT INTO users (username, email, password_hash) VALUES (%s, %s, %s) RETURNING id",
-                        (new_username.strip(), new_email.strip() or None, pw_hash),
+                    existing_email = db.execute_one(
+                        "SELECT id FROM users WHERE email = %s", (new_email.strip(),)
                     )
-                    st.session_state.user_id = str(user["id"])
-                    st.session_state.username = new_username.strip()
-                    st.session_state.llm_service = None
-                    _init_preferences(db, str(user["id"]))
-                    st.rerun()
+                    if existing_email:
+                        st.error("An account with this email already exists.")
+                    else:
+                        pw_hash = auth.hash_password(new_pw)
+                        user = db.execute_returning(
+                            "INSERT INTO users (username, email, password_hash) VALUES (%s, %s, %s) RETURNING id",
+                            (new_username.strip(), new_email.strip(), pw_hash),
+                        )
+                        st.session_state.user_id = str(user["id"])
+                        st.session_state.username = new_username.strip()
+                        st.session_state.llm_service = None
+                        _init_preferences(db, str(user["id"]))
+                        st.rerun()
             except Exception as e:
                 st.error(f"Registration failed: {e}")

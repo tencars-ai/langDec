@@ -6,7 +6,7 @@ from PIL import Image
 import io
 import fitz
 
-from utils.auth_ui import render_sidebar
+from utils.auth_ui import require_login, render_sidebar
 from utils.services_ui import get_decode_service, get_max_line_length, get_ocr_threshold
 from utils.styles import inject_styles, inject_decoded_style
 from utils.ui import LANGUAGES, save_to_library
@@ -17,10 +17,7 @@ from services.db_service import DBService
 
 st.set_page_config(page_title="langDec – Decode", layout="wide")
 
-if "user_id" not in st.session_state:
-    st.warning("Please log in first.")
-    st.stop()
-
+require_login()
 render_sidebar()
 inject_styles()
 inject_decoded_style()
@@ -149,22 +146,25 @@ def _save_decoded_words(decoded: str, src_lang: str, tgt_lang: str) -> None:
 
 # --- Decode logic ---
 if decode_clicked:
-    try:
-        with st.spinner("Decoding…"):
-            _result = _decoder.decode(
-                text=input_text.strip(),
-                source_lang=source_language,
-                target_lang=target_language,
-                max_line_length=max_line_length,
-            )
-        st.session_state.decoded_text = _result.aligned_text
-        st.session_state.decoder_comments = _result.comments
-        _save_decoded_words(st.session_state.decoded_text, source_language, target_language)
-        st.success("Decoding completed!")
-    except Exception as e:
-        st.error(f"Error: {e}")
-        st.session_state.decoded_text = ""
-        st.session_state.decoder_comments = ""
+    if not input_text.strip():
+        st.warning("Please enter some text first.")
+    else:
+        try:
+            with st.spinner("Decoding…"):
+                _result = _decoder.decode(
+                    text=input_text.strip(),
+                    source_lang=source_language,
+                    target_lang=target_language,
+                    max_line_length=max_line_length,
+                )
+            st.session_state.decoded_text = _result.aligned_text
+            st.session_state.decoder_comments = _result.comments
+            _save_decoded_words(st.session_state.decoded_text, source_language, target_language)
+            st.success("Decoding completed!")
+        except Exception as e:
+            st.error(f"Error: {e}")
+            st.session_state.decoded_text = ""
+            st.session_state.decoder_comments = ""
 
 # --- Output ---
 if st.session_state.decoded_text:

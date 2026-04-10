@@ -2,16 +2,13 @@
 Generate page – LLM text/dialogue generation, save to text library.
 """
 import streamlit as st
-from utils.auth_ui import render_sidebar
+from utils.auth_ui import require_login, render_sidebar
 from utils.styles import inject_styles
 from utils.ui import LANGUAGES, save_to_library
 
 st.set_page_config(page_title="langDec – Generate", layout="wide")
 
-if "user_id" not in st.session_state:
-    st.warning("Please log in first.")
-    st.stop()
-
+require_login()
 render_sidebar()
 inject_styles()
 

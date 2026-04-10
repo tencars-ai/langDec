@@ -35,3 +35,17 @@ def inject_decoded_style() -> None:
 def inject_translated_style() -> None:
     """Tint the translated output textarea. Call on pages that show translated text."""
     st.markdown(_TRANSLATED_CSS, unsafe_allow_html=True)
+
+
+def inject_spellcheck_off() -> None:
+    """Disable browser spellcheck on all textarea elements."""
+    st.markdown(
+        """<script>
+        const _scObs = new MutationObserver(() => {
+            document.querySelectorAll('textarea').forEach(el => el.spellcheck = false);
+        });
+        _scObs.observe(document.body, {childList: true, subtree: true});
+        document.querySelectorAll('textarea').forEach(el => el.spellcheck = false);
+        </script>""",
+        unsafe_allow_html=True,
+    )

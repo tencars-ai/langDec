@@ -90,7 +90,13 @@ def _birkenbihl_system_prompt(source_lang: str, target_lang: str) -> str:
         "4. Use [ ] only for grammatical particles that have no direct equivalent\n"
         "5. Do NOT use | inside any translation entry\n"
         "6. Do NOT produce a natural translation — if the output sounds fluent, it is WRONG\n"
-        "7. Numbers written as digits (e.g. 1, 42, 1., 3.5) must be copied UNCHANGED — do not translate or spell them out\n\n"
+        "7. Numbers written as digits (e.g. 1, 42, 1., 3.5) must be copied UNCHANGED — do not translate or spell them out\n"
+        "8. PRESERVE the capitalization pattern of the SOURCE word in your translation. "
+        "If the source word is lowercase (e.g. \"e\", \"no\", \"em\"), the translation MUST be lowercase "
+        "(e.g. \"und\", \"im\", \"in\"). Only capitalize if the source word itself is capitalized.\n"
+        "9. Use SENTENCE CONTEXT to pick the correct meaning of ambiguous words. "
+        "Example: Portuguese \"no\" = \"in the\" (contraction of em+o), NOT \"knot/node\". "
+        "Always prefer the grammatical role that fits the sentence over rare/technical meanings.\n\n"
         "CORRECT example (Portuguese → German):\n"
         "Source:  Eu  tenho  saudade  de    você\n"
         "Output:  Ich|habe  |Sehnsucht|von  |dir\n\n"
@@ -111,7 +117,8 @@ def _birkenbihl_user_prompt(text: str, source_lang: str, target_lang: str, token
         f"Translate word-for-word from {src} to {tgt}.\n"
         f"Source text: {text}\n"
         f"Source word count: {token_count}\n"
-        f"Required output entries: {token_count} (one per source word, pipe-separated)"
+        f"Required output entries: {token_count} (one per source word, pipe-separated)\n"
+        "REMINDER: Preserve source-word capitalization. Use sentence context for ambiguous words."
     )
 
 
