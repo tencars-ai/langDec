@@ -70,20 +70,117 @@ class WordByWordDecoder:
         source_lang: str,
         target_lang: str,
         max_line_length: int,
+        natural_translation: str = "",
     ) -> DecoderResult:
         """Main method to decode text word-by-word.
 
         Returns a DecoderResult with aligned_text and optional LLM comments.
-        Uses batch translation (one LLM call per line) when the service supports it,
-        otherwise falls back to per-word translation.
+
+        If natural_translation is provided and the service supports it, uses a
+        two-pass approach (single LLM call for all lines).  Otherwise falls back
+        to the legacy batch (one LLM call per line) or per-word path.
         """
         text = (text or "").strip()
         if not text:
             return DecoderResult(aligned_text="", comments="")
 
+        # Two-pass: send entire text + natural translation in one LLM call
+        if natural_translation and hasattr(self.translation_service, "translate_birkenbihl_full"):
+            return self._decode_two_pass(text, source_lang, target_lang, max_line_length, natural_translation)
+
         if hasattr(self.translation_service, "translate_birkenbihl"):
             return self._decode_batch(text, source_lang, target_lang, max_line_length)
         return self._decode_per_word(text, source_lang, target_lang, max_line_length)
+
+    _CHUNK_SIZE = 10  # lines per LLM call — balances speed vs. rate limits
+
+    def _decode_two_pass(
+        self,
+        text: str,
+        source_lang: str,
+        target_lang: str,
+        max_line_length: int,
+        natural_translation: str,
+    ) -> DecoderResult:
+        """Two-pass: chunk text into ~10-line groups, decode each chunk in parallel."""
+        raw_lines = text.split("\n")
+        # Collect non-empty lines with their original index
+        non_empty = [(i, line.strip()) for i, line in enumerate(raw_lines) if line.strip()]
+        if not non_empty:
+            return DecoderResult(aligned_text="", comments="")
+
+        # Build chunks of consecutive lines
+        chunks: list[list[tuple[int, str]]] = []
+        for k in range(0, len(non_empty), self._CHUNK_SIZE):
+            chunks.append(non_empty[k : k + self._CHUNK_SIZE])
+
+        # Process chunks in parallel (max 3 concurrent to avoid rate limits)
+        all_line_results: dict[int, dict] = {}
+        all_comments: list[str] = []
+        max_workers = min(len(chunks), 3)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_chunk = {
+                executor.submit(
+                    self._decode_chunk, chunk, source_lang, target_lang, natural_translation,
+                ): chunk
+                for chunk in chunks
+            }
+            for future in concurrent.futures.as_completed(future_to_chunk):
+                try:
+                    result = future.result()
+                    all_line_results.update(result.get("line_results", {}))
+                    comments = result.get("comments", "")
+                    if comments:
+                        all_comments.append(comments)
+                except Exception as exc:
+                    chunk = future_to_chunk[future]
+                    all_comments.append(f"[Chunk error: {exc}]")
+
+        # Assemble final output preserving original line order
+        decoded_lines = []
+        for i, raw_line in enumerate(raw_lines):
+            line = raw_line.strip()
+            if not line:
+                decoded_lines.append("")
+                continue
+            lr = all_line_results.get(i, {"words": [], "comments": ""})
+            tokens = self._tokenize(line)
+            translated_words = lr.get("words", [])
+            pairs = [
+                TokenPair(source_token=src, target_token=tgt)
+                for src, tgt in zip(tokens, translated_words)
+            ]
+            decoded_lines.append(self._format_aligned(pairs, max_line_length=max_line_length))
+
+        return DecoderResult(
+            aligned_text="\n".join(decoded_lines),
+            comments="\n\n".join(all_comments),
+        )
+
+    def _decode_chunk(
+        self,
+        chunk: list[tuple[int, str]],
+        source_lang: str,
+        target_lang: str,
+        natural_translation: str,
+    ) -> dict:
+        """Decode a chunk of lines via translate_birkenbihl_full.
+
+        Returns line_results keyed by the ORIGINAL line index (not chunk-local).
+        """
+        chunk_text = "\n".join(line for _, line in chunk)
+        raw_result = self.translation_service.translate_birkenbihl_full(
+            chunk_text, source_lang, target_lang, natural_translation,
+        )
+        # Re-key from chunk-local indices (0, 1, 2 …) to original text indices
+        chunk_local = raw_result.get("line_results", {})
+        remapped: dict[int, dict] = {}
+        local_indices = sorted(chunk_local.keys())
+        for j, orig_idx in enumerate(idx for idx, _ in chunk):
+            if j < len(local_indices):
+                remapped[orig_idx] = chunk_local[local_indices[j]]
+        return {"line_results": remapped, "comments": raw_result.get("comments", "")}
 
     def _decode_batch(
         self,

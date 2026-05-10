@@ -5,6 +5,7 @@ LANGUAGES = {
     "German (de)": "de",
     "English (en)": "en",
     "Portuguese (pt)": "pt",
+    "Swedish (sv)": "sv",
 }
 
 LANGUAGES_WITH_ALL = {

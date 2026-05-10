@@ -72,8 +72,9 @@ documents/               # Project documentation (requirements, tech concept)
 - German (`de`) – primary native language
 - English (`en`)
 - Portuguese (`pt`)
+- Swedish (`sv`)
 
-Architecture is language-agnostic; adding new languages requires only extending the `LANGUAGES` dict in `app.py` and ensuring translation service support.
+Architecture is language-agnostic; adding new languages requires only extending the `LANGUAGES` dict in `utils/ui.py` and ensuring translation service support.
 
 ---
 

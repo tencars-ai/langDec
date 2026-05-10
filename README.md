@@ -83,3 +83,6 @@ The architecture is **language-agnostic** and designed for easy expansion to add
 ---
 
 **Status:** Prototype Development 
+
+## Erkenntnisse
+- Die Rechtschreibung muss gut sein vom input text geprüft / korrigiert werden, damit die Aussprache des generierten Texts funktioniert

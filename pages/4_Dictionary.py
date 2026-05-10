@@ -21,7 +21,7 @@ vocab = VocabularyManager(db)
 
 st.title("Personal Dictionary")
 
-LANGUAGES = {"All": None, "German (de)": "de", "English (en)": "en", "Portuguese (pt)": "pt"}
+LANGUAGES = {"All": None, "German (de)": "de", "English (en)": "en", "Portuguese (pt)": "pt", "Swedish (sv)": "sv"}
 
 col1, col2, col3 = st.columns(3)
 with col1:

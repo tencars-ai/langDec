@@ -65,12 +65,12 @@
 
 ## Branch MVP-01 Bugs 
 ### Texfelder
--[ ] wenn möglich: Spellcorrection ausschalen oder entsprechen der sprache durchfüreh (rote kringellinien), wahrscheinlich ist das die vom Brownser, kann man gar nicht in der app auschalten, oder? Oder kann man dem browser übermitteln welche sprache es haben soll.
+-[x] wenn möglich: Spellcorrection ausschalen oder entsprechen der sprache durchfüreh (rote kringellinien), wahrscheinlich ist das die vom Brownser, kann man gar nicht in der app auschalten, oder? Oder kann man dem browser übermitteln welche sprache es haben soll.
+--> workaround erstmal im browsesr richte spell correction wählen
+
 ### Bugs Prio 1
 
--[ ] ! abfangen wenn der input Text leer ist  und auf decode geklickt wird  nicht sagen es sei komplett
-
-## branch MVP-01 login and logout
+-[ ] ! abfangen wenn der input Text leer ist  und auf "Decode & Translate" geklickt wird nicht sagen es sei komplett, sondern meldung: Please insert text
 -[ ] wenn ich mich gerade ausgeloggt habe, hat die aktuelle seite keinen login button
 -[ ] login mit einer eindeutigen emailadressse als user
 
@@ -78,16 +78,18 @@
 ## Branch Folder & Menu MVP-01
 ### Folder
 -[ ] !! keine Rückmeldung wenn Folder angelegt wurde, und sieht man irgendwo die folder?
--[ ] Save in Folder im Decode & Translate direct
+-[x] Save in Folder im Decode & Translate direct
+-[ ] "Save to text library" nicht zuklappbar sondern immer offen wie die anderen abschnitte
+
 ### Menu
--[ ] die zwei separaten Menüpunkte Decode, Translate auskommentieren, und zunächst nur die Combinierte Variante machen.
--[ ] vocabel dictonary feature erstmal auskommentieren, im menu "Dictonary" und auch im decode&translate. reaktivieren und verfeinern wir später
--[ ] genauso wie vokab Trainer auch, auskommenieren und später weiterentwickeln.
--[ ] audio auch, aber das feature ist be Decode& Translate schon eingebaut. Dort sollte man aber das audio auch absoielen können.
--[ ] der Start Menu Punkt soll "Decode Text" heißen
--[ ] der Menüpunkt Texts soll "Text Library" heißen. hier sollten alle texte angezeigt werden können, originalcode. decodiert, translated, notes und auch das audio abspielbar
-- [ ] generate erstzmal auskommenieren.
-- [ ] settings und help bleiben-
+-[x] die zwei separaten Menüpunkte Decode, Translate auskommentieren, und zunächst nur die Combinierte Variante machen.
+-[x] vocabel dictonary feature erstmal auskommentieren, im menu "Dictonary" und auch im decode&translate. reaktivieren und verfeinern wir später
+-[x] genauso wie vokab Trainer auch, auskommenieren und später weiterentwickeln.
+-[x] audio auch, aber das feature ist be Decode& Translate schon eingebaut. Dort sollte man aber das audio auch absoielen können.
+-[x] der Start Menu Punkt soll "Decode Text" heißen
+-[x] der Menüpunkt Texts soll "Text Library" heißen. hier sollten alle texte angezeigt werden können, originalcode. decodiert, translated, notes und auch das audio abspielbar
+- [x] generate erstzmal auskommenieren.
+- [x] settings und help bleiben-
  
 
 ## Branch: Decoding Bugs
@@ -95,7 +97,31 @@
 -[ ] sollte schon erledigt sein. Aber bitte vom Architekten Agent nochmal überprüfen lassen. Decoding ist noch recht langsam: decoder algorithmus ggf. anpassen, dass zunächst der Ganze Text im Konext übersetzt wird und dann die einzelnen wörter 1:1 übersetzt zugeordnet werden. 
 
 
+## neue bugs
+- [ ] ich würde gern die linebreaks vom input auch in der tranlation Behalten
+- [x] die leiste mit der audiowiedergabe sollte direkT UNter das decoding (word-by-word). und ohne die Überschrift Audio.
+- [ ] die Überschrift "Decoding (word-by-word)" sollte "Decoded Text (word-by-word)" sein.
+- [ ] à wir Die übersetzt, erstens glaub ich das es falsch ist und es müsste im Satz ja klein geschrieben werden "die" für "a" aber "à" "a+a" heißt ja "in die" oder sowas
+- [ ] bug bei Text library. hab ein folder angelegt aber es erscheint nicht
+- [ ] "Add test manually" brauchen wir nicht, bitte diese box ausbauen
+
+- [ ] audio lässt sich nicht als brauchbare datei runterladen
+
+- [ ] erneute Decode Generierung zeigt dann den Text nicht mehr an
+- [ ] Sonderzeichen ç werden nicht immer vom originaltext zum decoded text übernommen
+- [ ] vor dem login ist das ganze Menü zu sehen, welches es dann später gar nicht mehr gibt. Ist das doppelt definiert. kann dort nicht einfach das gleiche oder gar kein menu angezeigt werden?
+
+
 ## MVP-02 Phase
+- [ ] gibt es eine bessere Darstellungsversion für die Folder in der Text-Library? Bitte erst Vorschlag vor Änderung
+- [ ] wir bräuchten beim vorlesen eine Markierung im Text wo wir uns gerade befinden. Mindestens die Zeile besser die Worter einfach fett hervorheben. geht das irgendwie?
+
+if promt improvement did not work we can do that:
+For improving decoding quality (capitalization, 'No'→'Knoten' bug): should we start with prompt-only improvements, or also  
+implement the two-pass architecture (translate full text first, then use that context for word-by-word mapping)?  
+## Prompt + two-pass architecture
+-[ ]     Also add a pre-pass that translates the full text contextually, then feeds that as disambiguation context to the 
+     word-by-word step. More complex but potentially better quality.
 
 ### Dictionary und Vokabeltrainer
 -[ ] dictionary füllt sich automatisch mit dem was man je übersetzt hat. konzept wie es sich füllt, welche infos stehen denn dann drin?
@@ -121,6 +147,9 @@
 - [ ] beim output des translators bitte auch markdown nutzen. beim generate text auch immer den prompt mitspeicher. und auch immer den urspünglichen text speichern. Wahrscheinlich sollte jeder Text mehrere spalten in der datenbank baben. urspung, decode, translate, ...
 
 
+## UX
+-[ ] man braucht ne schaltfläche für die sonderzeichen
+
 
 ## Config
 - [ ] Modelle für einzelne Module konfigurierbar machen
@@ -141,3 +170,6 @@
 
 ### Long-term
 - [ ] Variant 2: FastAPI + Reflex/React
+- [ ] Multi-Language Support of GUI, alle Sprachen für die Bedieung und Doku anbieten, die wir auch in der APP anbieten. Prototype aber nur auf Englsisch
+- [ ] Spell-Correction für alle unterstützten Sprachen anbieten (auch damit das Audio richtig wird)
+- [ ] email-bestätigung

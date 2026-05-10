@@ -85,28 +85,30 @@ tab_login, tab_register = st.tabs(["Login", "Register"])
 
 with tab_login:
     with st.form("login_form"):
-        login_email = st.text_input("Email")
+        login_id = st.text_input("Username or Email")
         password = st.text_input("Password", type="password")
         login_btn = st.form_submit_button("Login", type="primary", use_container_width=True)
 
     if login_btn:
-        if not login_email.strip() or not password:
-            st.error("Please enter email and password.")
+        if not login_id.strip() or not password:
+            st.error("Please enter username or email and password.")
         else:
             try:
                 db, auth, build_llm = _get_services()
+                identifier = login_id.strip()
                 user = db.execute_one(
-                    "SELECT id, username, password_hash FROM users WHERE email = %s",
-                    (login_email.strip(),),
+                    "SELECT id, username, password_hash FROM users"
+                    " WHERE username = %s OR email = %s",
+                    (identifier, identifier),
                 )
                 if user and auth.verify_password(password, user["password_hash"]):
                     st.session_state.user_id = str(user["id"])
-                    st.session_state.username = user["username"] or login_email.strip()
+                    st.session_state.username = user["username"] or identifier
                     _load_llm_service(db, auth, build_llm, str(user["id"]))
                     _init_preferences(db, str(user["id"]))
                     st.rerun()
                 else:
-                    st.error("Invalid email or password.")
+                    st.error("Invalid username/email or password.")
             except Exception as e:
                 st.error(f"Login failed: {e}")
 

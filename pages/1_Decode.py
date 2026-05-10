@@ -171,7 +171,7 @@ if st.session_state.decoded_text:
     st.markdown("#### 🔤 Decoded text (word-by-word)")
 st.text_area("Decoded text (word-by-word)", value=st.session_state.decoded_text, height=220, label_visibility="collapsed", help="Select and copy (Ctrl/Cmd + C).")
 if st.session_state.get("decoder_comments"):
-    st.markdown("#### 📝 Notes")
+    st.markdown("#### 📝 Hints")
     st.info(st.session_state.decoder_comments)
 
 # --- Save to text library ---
@@ -188,7 +188,7 @@ if st.session_state.decoded_text:
 # --- Download ---
 _download_content = st.session_state.decoded_text or ""
 if st.session_state.get("decoder_comments"):
-    _download_content += f"\n\n--- Notes ---\n{st.session_state.decoder_comments}"
+    _download_content += f"\n\n--- Hints ---\n{st.session_state.decoder_comments}"
 st.download_button(
     "Download decoded text as .txt",
     data=_download_content,

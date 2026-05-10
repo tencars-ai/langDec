@@ -137,58 +137,48 @@ decode_translate_clicked = st.button("Decode & Translate", type="primary", use_c
 #         pass
 
 # --- Output slots: populated live during processing or from session state on re-renders ---
-_decoded_slot = st.empty()
+# Order: Translation first (fastest), then Decoding (audio embedded above the textarea), then Notes.
 _translated_slot = st.empty()
+_decoded_slot = st.empty()
 _notes_slot = st.empty()
-_audio_slot = st.empty()
+
+
+def _render_decoded_section(slot, decoded: str, audio_bytes, key: str) -> None:
+    """Render the Decoding section with audio between heading and text area."""
+    if not decoded and not audio_bytes:
+        return
+    with slot.container():
+        st.markdown("#### 🔤 Decoding (word-by-word)")
+        if audio_bytes:
+            st.audio(audio_bytes, format="audio/mp3")
+        if decoded:
+            st.text_area(
+                "Decoded",
+                value=decoded,
+                height=200,
+                key=key,
+                label_visibility="collapsed",
+                help="Monospace alignment — original word above, literal translation below.",
+            )
 
 # --- Decode & Translate & Audio logic ---
 if decode_translate_clicked:
     if not input_text.strip():
         st.warning("Please enter some text first.")
     else:
-        with st.status("Processing in parallel…", expanded=True) as _status:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as _executor:
-                _future_decode = _executor.submit(
-                    _decoder.decode,
-                    input_text.strip(), source_language, target_language, max_line_length,
-                )
+        with st.status("Processing…", expanded=True) as _status:
+            _stripped = input_text.strip()
+
+            # Step 1: Translation + Audio in parallel
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as _executor:
                 _future_translate = _executor.submit(
-                    _translator.translate,
-                    input_text.strip(), source_language, target_language,
+                    _translator.translate, _stripped, source_language, target_language,
                 )
                 _future_audio = _executor.submit(
-                    _tts.synthesize,
-                    input_text.strip(), source_language,
+                    _tts.synthesize, _stripped, source_language,
                 )
-                for _future in concurrent.futures.as_completed(
-                    [_future_decode, _future_translate, _future_audio]
-                ):
-                    if _future is _future_decode:
-                        try:
-                            _r = _future.result()
-                            st.session_state.start_decoded = _r.aligned_text
-                            st.session_state.start_comments = _r.comments
-                            # _save_decoded_words(_r.aligned_text, source_language, target_language)  # MVP-01: dictionary disabled
-                            st.write("✅ Decoding done")
-                            with _decoded_slot.container():
-                                st.markdown("#### 🔤 Decoding (word-by-word)")
-                                st.text_area(
-                                    "Decoded",
-                                    value=_r.aligned_text,
-                                    height=200,
-                                    label_visibility="collapsed",
-                                    help="Monospace alignment — original word above, literal translation below.",
-                                )
-                            if _r.comments:
-                                with _notes_slot.container():
-                                    st.markdown("#### 📝 Notes")
-                                    st.info(_r.comments)
-                        except Exception as _e:
-                            st.write(f"❌ Decoding error: {_e}")
-                            st.session_state.start_decoded = ""
-                            st.session_state.start_comments = ""
-                    elif _future is _future_translate:
+                for _future in concurrent.futures.as_completed([_future_translate, _future_audio]):
+                    if _future is _future_translate:
                         try:
                             _t = _future.result()
                             st.session_state.start_translated = _t
@@ -204,47 +194,58 @@ if decode_translate_clicked:
                             _audio = _future.result()
                             st.session_state.start_audio = _audio
                             st.write("✅ Audio ready")
-                            with _audio_slot.container():
-                                st.markdown("#### 🔊 Audio")
-                                st.audio(_audio, format="audio/mp3")
+                            # Audio renders together with the Decoding section once decoding finishes.
                         except Exception as _e:
                             st.write(f"❌ Audio error: {_e}")
                             st.session_state.start_audio = None
+
+            # Step 2: Decode using translation as context (single LLM call)
+            try:
+                _r = _decoder.decode(
+                    _stripped, source_language, target_language, max_line_length,
+                    natural_translation=st.session_state.start_translated,
+                )
+                st.session_state.start_decoded = _r.aligned_text
+                st.session_state.start_comments = _r.comments
+                st.write("✅ Decoding done")
+                _render_decoded_section(
+                    _decoded_slot, _r.aligned_text, st.session_state.start_audio, key="decoded_live",
+                )
+                if _r.comments:
+                    with _notes_slot.container():
+                        st.markdown("#### 📝 Hints")
+                        st.info(_r.comments)
+            except Exception as _e:
+                st.write(f"❌ Decoding error: {_e}")
+                st.session_state.start_decoded = ""
+                st.session_state.start_comments = ""
+
             _status.update(label="Done!", state="complete")
 
         st.session_state.start_output = (
             "=== DECODING ===\n\n" + st.session_state.start_decoded
             + "\n\n=== TRANSLATION ===\n\n" + st.session_state.start_translated
-            + ("\n\n=== NOTES ===\n\n" + st.session_state.start_comments
+            + ("\n\n=== HINTS ===\n\n" + st.session_state.start_comments
                if st.session_state.start_comments else "")
         )
 
 # --- Populate output slots (after click or on re-renders from session state) ---
-if st.session_state.start_decoded:
-    with _decoded_slot.container():
-        st.markdown("#### 🔤 Decoding (word-by-word)")
-        st.text_area(
-            "Decoded",
-            value=st.session_state.start_decoded,
-            height=200,
-            label_visibility="collapsed",
-            help="Monospace alignment — original word above, literal translation below.",
-        )
-
 if st.session_state.start_translated:
     with _translated_slot.container():
         st.markdown("#### 🌐 Translation (natural)")
         st.markdown(st.session_state.start_translated)
 
+_render_decoded_section(
+    _decoded_slot,
+    st.session_state.start_decoded,
+    st.session_state.start_audio,
+    key="decoded_state",
+)
+
 if st.session_state.start_comments:
     with _notes_slot.container():
         st.markdown("#### 📝 Notes")
         st.info(st.session_state.start_comments)
-
-if st.session_state.start_audio:
-    with _audio_slot.container():
-        st.markdown("#### 🔊 Audio")
-        st.audio(st.session_state.start_audio, format="audio/mp3")
 
 # --- Save to text library ---
 if st.session_state.start_output:

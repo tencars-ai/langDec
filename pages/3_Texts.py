@@ -62,6 +62,12 @@ with col_b:
 
 st.markdown("---")
 
+# --- Load all folders for this user (so empty folders also render) ---
+all_folders = db.execute(
+    "SELECT name FROM folders WHERE user_id = %s ORDER BY name",
+    (user_id,),
+)
+
 # --- Load all texts with folder info ---
 texts = db.execute(
     """
@@ -75,21 +81,25 @@ texts = db.execute(
     (user_id,),
 )
 
-if not texts:
+if not texts and not all_folders:
     st.info("No texts yet. Decode a text or add one manually above.")
 else:
     search = st.text_input("🔍 Search", placeholder="Filter by title…", key="texts_search")
 
-    # Group texts by folder
+    # Seed groups with every existing folder so empty folders still render.
     from collections import defaultdict
     folders_data: dict[str | None, list] = defaultdict(list)
+    for f in all_folders:
+        folders_data[f["name"]] = []
+
+    # Group texts by folder
     for text in texts:
         if search and search.lower() not in text["title"].lower():
             continue
         key = text["folder_name"]  # None → no folder
         folders_data[key].append(text)
 
-    if not any(folders_data.values()):
+    if not folders_data:
         st.info("No texts match your search.")
     else:
         # Show "(No folder)" group first if it has entries
@@ -100,7 +110,11 @@ else:
 
         for folder_name_key in ordered_keys:
             group = folders_data[folder_name_key]
-            if not group:
+            # Hide empty "(No folder)" pseudo-group, but always show real empty folders.
+            if folder_name_key is None and not group:
+                continue
+            # When searching, hide folders with no matches (real or pseudo).
+            if search and not group:
                 continue
 
             label = folder_name_key if folder_name_key else "📄 (No folder)"
@@ -108,6 +122,8 @@ else:
             count = len(group)
 
             with st.expander(f"{icon}{label}  —  {count} text{'s' if count != 1 else ''}", expanded=False):
+                if not group:
+                    st.caption("_Empty folder._")
                 for text in group:
                     with st.expander(
                         f"{text['title']}  ·  {text['source_language'].upper()}  ·  {str(text['created_at'])[:10]}",
@@ -128,7 +144,7 @@ else:
                         if translated_val:
                             tab_labels.append("Translation")
                         if notes_val:
-                            tab_labels.append("Notes")
+                            tab_labels.append("Hints")
 
                         tabs = st.tabs(tab_labels)
                         idx = 0
