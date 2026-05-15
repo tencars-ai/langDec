@@ -151,6 +151,16 @@ _debug_slot = st.empty()
 _error_slot = st.empty()
 
 
+def _md_preserve_breaks(text: str) -> str:
+    """Make single \\n render as a line break in st.markdown.
+
+    Markdown collapses a single newline into a space. Two trailing spaces
+    before \\n is the official hard-break syntax. \\n\\n still works as a
+    paragraph break because the trailing spaces sit on an otherwise blank line.
+    """
+    return (text or "").replace("\n", "  \n")
+
+
 def _render_audio_section(slot, audio_bytes) -> None:
     """Audio is its own UX component, rendered as soon as TTS is ready."""
     if not audio_bytes:
@@ -231,7 +241,7 @@ if decode_translate_clicked:
                             st.write("✅ Translation done")
                             with _translated_slot.container():
                                 st.markdown("#### 🌐 Translation (natural)")
-                                st.markdown(_t)
+                                st.markdown(_md_preserve_breaks(_t))
                         except Exception as _e:
                             err = f"Translation failed: {type(_e).__name__}: {_e}"
                             st.write(f"❌ {err}")
@@ -295,7 +305,7 @@ if not decode_translate_clicked:
     if st.session_state.start_translated:
         with _translated_slot.container():
             st.markdown("#### 🌐 Translation (natural)")
-            st.markdown(st.session_state.start_translated)
+            st.markdown(_md_preserve_breaks(st.session_state.start_translated))
 
     _render_audio_section(_audio_slot, st.session_state.start_audio)
     _render_decoded_section(

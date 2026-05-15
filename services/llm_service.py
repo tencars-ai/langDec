@@ -311,7 +311,10 @@ class OpenAIService(LLMService):
         tgt = _LANG_NAMES.get(target_lang, target_lang)
         system = (
             f"You are a professional translator. Translate the following text from {src} to {tgt}. "
-            "Provide a natural, fluent translation. Return ONLY the translation."
+            "Provide a natural, fluent translation. "
+            "Preserve the original line break and paragraph structure exactly — "
+            "do not merge separate lines, do not split single lines. "
+            "Return ONLY the translation."
         )
         return self._chat(system, text)
 
@@ -426,7 +429,10 @@ class ClaudeService(LLMService):
         tgt = _LANG_NAMES.get(target_lang, target_lang)
         system = (
             f"You are a professional translator. Translate the following text from {src} to {tgt}. "
-            "Provide a natural, fluent translation. Return ONLY the translation."
+            "Provide a natural, fluent translation. "
+            "Preserve the original line break and paragraph structure exactly — "
+            "do not merge separate lines, do not split single lines. "
+            "Return ONLY the translation."
         )
         return self._message(system, text)
 
