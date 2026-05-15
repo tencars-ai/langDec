@@ -47,17 +47,23 @@ _LIST_MARKER_PATTERNS = [
     re.compile(r"^\s*([\-*•·])\s+"),         # -   *   •   ·
 ]
 
+# Line ends a sentence if it ends with . ! ? (allow trailing whitespace/quotes).
+_SENTENCE_END_RE = re.compile(r'[.!?][\s"\')\]]*$')
+
 
 class WordByWordDecoder:
     """Birkenbihl-style word-by-word decoder.
 
-    Uses the LLM's schema-enforced JSON output when the translation service
+    Uses the LLM's plain-text decode output when the translation service
     provides `translate_birkenbihl_full`; otherwise falls back to per-word
-    calls. Long inputs are chunked and decoded in parallel.
+    calls. Long inputs are chunked along paragraph and sentence boundaries
+    and decoded in parallel.
     """
 
-    _CHUNK_SIZE = 10            # source lines per LLM call
-    _MAX_PARALLEL_CHUNKS = 3    # concurrent LLM calls
+    _TARGET_LINES_PER_CHUNK = 10   # aim for this many source lines per LLM call
+    _MAX_LINES_PER_CHUNK    = 15   # hard cap before forcing a split
+    _MIN_LINES_PER_CHUNK    = 2    # merge trailing tail-chunks below this
+    _MAX_PARALLEL_CHUNKS    = 3    # concurrent LLM calls
 
     def __init__(self, translation_service: TranslationService, debug: bool = False):
         self.translation_service = translation_service
@@ -114,14 +120,9 @@ class WordByWordDecoder:
         target_lang: str,
         max_line_length: int,
     ) -> DecoderResult:
-        non_empty = [p for p in pre if p.content]
-        if not non_empty:
+        chunks = self._build_chunks(pre)
+        if not chunks:
             return DecoderResult(aligned_text="", comments="")
-
-        chunks = [
-            non_empty[k : k + self._CHUNK_SIZE]
-            for k in range(0, len(non_empty), self._CHUNK_SIZE)
-        ]
 
         line_results: dict[int, dict] = {}
         comments_parts: list[str] = []
@@ -130,28 +131,109 @@ class WordByWordDecoder:
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_chunk = {
-                executor.submit(self._decode_chunk, chunk, source_lang, target_lang): chunk
-                for chunk in chunks
+                executor.submit(self._decode_chunk, chunk, source_lang, target_lang): (n, chunk)
+                for n, chunk in enumerate(chunks, start=1)
             }
             for future in concurrent.futures.as_completed(future_to_chunk):
+                n, chunk = future_to_chunk[future]
+                first_idx = chunk[0].raw_idx + 1  # 1-based input line numbers
+                last_idx = chunk[-1].raw_idx + 1
+                chunk_label = f"chunk {n}/{len(chunks)} (lines {first_idx}-{last_idx})"
                 try:
                     result = future.result()
                     line_results.update(result.get("line_results", {}))
                     c = result.get("comments", "")
                     if c:
                         comments_parts.append(c)
-                    if self.debug and result.get("raw_payload") is not None:
+                    if self.debug:
+                        payload = result.get("raw_payload")
                         debug_parts.append(
-                            json.dumps(result["raw_payload"], indent=2, ensure_ascii=False)
+                            f"=== {chunk_label} ===\n"
+                            + (json.dumps(payload, indent=2, ensure_ascii=False)
+                               if payload is not None else "(no payload)")
                         )
                 except Exception as exc:
-                    comments_parts.append(f"[Chunk error: {exc}]")
+                    err = f"[{chunk_label}: {type(exc).__name__}: {exc}]"
+                    comments_parts.append(err)
+                    if self.debug:
+                        debug_parts.append(f"=== {chunk_label} ===\nERROR: {type(exc).__name__}: {exc}")
 
         return self._assemble(
             pre, line_results, max_line_length,
             comments="\n\n".join(comments_parts),
-            debug_info="\n\n--- chunk ---\n\n".join(debug_parts),
+            debug_info="\n\n".join(debug_parts),
         )
+
+    # ------------------------------------------------------------------
+    # Chunking — paragraph- and sentence-aware
+    # ------------------------------------------------------------------
+
+    def _build_chunks(
+        self, pre: list[PreprocessedLine],
+    ) -> list[list[PreprocessedLine]]:
+        """Group non-empty preprocessed lines into chunks for the LLM.
+
+        Strategy:
+          1. Split at blank lines into paragraphs (semantic groups).
+          2. Paragraphs <= MAX go as one chunk.
+          3. Longer paragraphs are sliced at sentence boundaries when possible,
+             aiming for TARGET lines per chunk, never exceeding MAX.
+          4. A trailing chunk smaller than MIN is merged into the previous one
+             when that keeps it within MAX.
+        """
+        paragraphs = self._split_into_paragraphs(pre)
+
+        chunks: list[list[PreprocessedLine]] = []
+        for para in paragraphs:
+            if len(para) <= self._MAX_LINES_PER_CHUNK:
+                chunks.append(para)
+            else:
+                chunks.extend(self._slice_paragraph(para))
+
+        # Merge a short tail into the previous chunk if it stays within MAX.
+        if (
+            len(chunks) >= 2
+            and len(chunks[-1]) < self._MIN_LINES_PER_CHUNK
+            and len(chunks[-1]) + len(chunks[-2]) <= self._MAX_LINES_PER_CHUNK
+        ):
+            chunks[-2].extend(chunks[-1])
+            chunks.pop()
+
+        return chunks
+
+    @staticmethod
+    def _split_into_paragraphs(
+        pre: list[PreprocessedLine],
+    ) -> list[list[PreprocessedLine]]:
+        paragraphs: list[list[PreprocessedLine]] = []
+        current: list[PreprocessedLine] = []
+        for p in pre:
+            if p.content:
+                current.append(p)
+            elif current:
+                paragraphs.append(current)
+                current = []
+        if current:
+            paragraphs.append(current)
+        return paragraphs
+
+    def _slice_paragraph(
+        self, para: list[PreprocessedLine],
+    ) -> list[list[PreprocessedLine]]:
+        """Slice an oversized paragraph at sentence boundaries when possible."""
+        result: list[list[PreprocessedLine]] = []
+        current: list[PreprocessedLine] = []
+        for p in para:
+            current.append(p)
+            ends_sentence = bool(_SENTENCE_END_RE.search(p.content))
+            big_enough = len(current) >= self._TARGET_LINES_PER_CHUNK
+            at_cap = len(current) >= self._MAX_LINES_PER_CHUNK
+            if at_cap or (big_enough and ends_sentence):
+                result.append(current)
+                current = []
+        if current:
+            result.append(current)
+        return result
 
     def _decode_chunk(
         self,

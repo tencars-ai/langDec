@@ -266,6 +266,8 @@ class OpenAIService(LLMService):
     def name(self) -> str:
         return "OpenAI"
 
+    _REQUEST_TIMEOUT = 60.0
+
     def _chat(self, system: str, user: str, max_tokens: int = 2048) -> str:
         response = self._client.chat.completions.create(
             model=self._model,
@@ -275,6 +277,7 @@ class OpenAIService(LLMService):
             ],
             temperature=0.2,
             max_tokens=max_tokens,
+            timeout=self._REQUEST_TIMEOUT,
         )
         return response.choices[0].message.content.strip()
 
@@ -381,12 +384,15 @@ class ClaudeService(LLMService):
     def name(self) -> str:
         return "Claude (Anthropic)"
 
+    _REQUEST_TIMEOUT = 60.0
+
     def _message(self, system: str, user: str, max_tokens: int = 1024) -> str:
         response = self._client.messages.create(
             model=self._model,
             max_tokens=max_tokens,
             system=system,
             messages=[{"role": "user", "content": user}],
+            timeout=self._REQUEST_TIMEOUT,
         )
         return response.content[0].text.strip()
 
