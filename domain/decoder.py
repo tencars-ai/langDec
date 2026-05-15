@@ -1,69 +1,70 @@
-# Enable modern type hints (allows referencing class names before definition)
 from __future__ import annotations
 
 import concurrent.futures
+import json
+import re
 from dataclasses import dataclass
 from typing import List
 
 from services.translation_service import TranslationService
 
 
-# @dataclass creates a simple data container class automatically
-# frozen=True makes this class immutable (can't change values after creation)
 @dataclass(frozen=True)
 class DecoderResult:
     """Result from WordByWordDecoder.decode()."""
     aligned_text: str
     comments: str = ""
+    debug_info: str = ""  # raw LLM payload(s) as formatted JSON when debug=True, else ""
 
 
 @dataclass(frozen=True)
 class TokenPair:
-    """Represents a pair of tokens: source word and its translation.
-    
-    Example: TokenPair(source_token="hello", target_token="hallo")
-    """
-    source_token: str  # The original word (e.g., "hello")
-    target_token: str  # The translated word (e.g., "hallo")
+    """A source token paired with its target translation."""
+    source_token: str
+    target_token: str
 
-    # @property makes this method accessible like an attribute: pair.column_width instead of pair.column_width()
     @property
     def column_width(self) -> int:
-        """Calculate the column width needed to display both words aligned.
-        
-        Returns the length of the longer word so both can fit in the same column.
-        Example: "hello" (5) and "hallo" (5) → returns 5
-                 "hi" (2) and "hallo" (5) → returns 5
-        """
         return max(len(self.source_token or ""), len(self.target_token or ""))
 
 
+@dataclass(frozen=True)
+class PreprocessedLine:
+    """One input line after list-marker stripping.
+
+    `raw_idx` is the line's index in the original split-by-"\n" input. The
+    marker — if any — is preserved here so the renderer can prepend it back
+    onto the aligned output, while the decoder itself never sees it.
+    """
+    raw_idx: int
+    leading_marker: str   # "1.", "-", or "" if no list marker
+    content: str          # the line with the marker stripped, trimmed
+
+
+_LIST_MARKER_PATTERNS = [
+    re.compile(r"^\s*(\d+[\.\)])\s+"),       # 1.  2)  42.
+    re.compile(r"^\s*([a-zA-Z][\.\)])\s+"),  # a.  B)
+    re.compile(r"^\s*([\-*•·])\s+"),         # -   *   •   ·
+]
+
+
 class WordByWordDecoder:
-    """
-    Word-by-word decoder (Birkenbihl-style alignment).
-    
-    This is the core class that handles the decoding process.
+    """Birkenbihl-style word-by-word decoder.
 
-    Responsibilities:
-      - Tokenize input text into words (simple split by spaces)
-      - Translate each word individually via a TranslationService
-      - Align output in two lines (source above target)
-      - Insert line breaks based on configured max line length
-
+    Uses the LLM's schema-enforced JSON output when the translation service
+    provides `translate_birkenbihl_full`; otherwise falls back to per-word
+    calls. Long inputs are chunked and decoded in parallel.
     """
 
-    # __init__ is the constructor - called when creating a new instance
-    # self refers to the instance being created
-    def __init__(self, translation_service: TranslationService):
-        """Initialize the decoder with a translation service.
-        
-        Args:
-            translation_service: Any object that implements the translate_word method
-        """
-        # Store the translation service as an instance variable (attribute)
-        # self.xyz means "this variable belongs to this specific instance"
+    _CHUNK_SIZE = 10            # source lines per LLM call
+    _MAX_PARALLEL_CHUNKS = 3    # concurrent LLM calls
+
+    def __init__(self, translation_service: TranslationService, debug: bool = False):
         self.translation_service = translation_service
+        self.debug = debug
 
+    # `natural_translation` is accepted but ignored — it's still in the signature
+    # because callers may pass it; we removed it as an LLM input intentionally.
     def decode(
         self,
         text: str,
@@ -72,330 +73,237 @@ class WordByWordDecoder:
         max_line_length: int,
         natural_translation: str = "",
     ) -> DecoderResult:
-        """Main method to decode text word-by-word.
-
-        Returns a DecoderResult with aligned_text and optional LLM comments.
-
-        If natural_translation is provided and the service supports it, uses a
-        two-pass approach (single LLM call for all lines).  Otherwise falls back
-        to the legacy batch (one LLM call per line) or per-word path.
-        """
         text = (text or "").strip()
         if not text:
             return DecoderResult(aligned_text="", comments="")
 
-        # Two-pass: send entire text + natural translation in one LLM call
-        if natural_translation and hasattr(self.translation_service, "translate_birkenbihl_full"):
-            return self._decode_two_pass(text, source_lang, target_lang, max_line_length, natural_translation)
+        pre = self._preprocess_lines(text)
+        if hasattr(self.translation_service, "translate_birkenbihl_full"):
+            return self._decode_llm(pre, source_lang, target_lang, max_line_length)
+        return self._decode_per_word(pre, source_lang, target_lang, max_line_length)
 
-        if hasattr(self.translation_service, "translate_birkenbihl"):
-            return self._decode_batch(text, source_lang, target_lang, max_line_length)
-        return self._decode_per_word(text, source_lang, target_lang, max_line_length)
+    # ------------------------------------------------------------------
+    # Pre-processing
+    # ------------------------------------------------------------------
 
-    _CHUNK_SIZE = 10  # lines per LLM call — balances speed vs. rate limits
+    def _preprocess_lines(self, text: str) -> list[PreprocessedLine]:
+        result: list[PreprocessedLine] = []
+        for i, raw in enumerate(text.split("\n")):
+            marker, content = self._strip_list_marker(raw)
+            result.append(
+                PreprocessedLine(raw_idx=i, leading_marker=marker, content=content.strip())
+            )
+        return result
 
-    def _decode_two_pass(
+    @staticmethod
+    def _strip_list_marker(raw: str) -> tuple[str, str]:
+        for pattern in _LIST_MARKER_PATTERNS:
+            m = pattern.match(raw)
+            if m:
+                return m.group(1), raw[m.end():]
+        return "", raw
+
+    # ------------------------------------------------------------------
+    # LLM path (chunked + parallel)
+    # ------------------------------------------------------------------
+
+    def _decode_llm(
         self,
-        text: str,
+        pre: list[PreprocessedLine],
         source_lang: str,
         target_lang: str,
         max_line_length: int,
-        natural_translation: str,
     ) -> DecoderResult:
-        """Two-pass: chunk text into ~10-line groups, decode each chunk in parallel."""
-        raw_lines = text.split("\n")
-        # Collect non-empty lines with their original index
-        non_empty = [(i, line.strip()) for i, line in enumerate(raw_lines) if line.strip()]
+        non_empty = [p for p in pre if p.content]
         if not non_empty:
             return DecoderResult(aligned_text="", comments="")
 
-        # Build chunks of consecutive lines
-        chunks: list[list[tuple[int, str]]] = []
-        for k in range(0, len(non_empty), self._CHUNK_SIZE):
-            chunks.append(non_empty[k : k + self._CHUNK_SIZE])
+        chunks = [
+            non_empty[k : k + self._CHUNK_SIZE]
+            for k in range(0, len(non_empty), self._CHUNK_SIZE)
+        ]
 
-        # Process chunks in parallel (max 3 concurrent to avoid rate limits)
-        all_line_results: dict[int, dict] = {}
-        all_comments: list[str] = []
-        max_workers = min(len(chunks), 3)
+        line_results: dict[int, dict] = {}
+        comments_parts: list[str] = []
+        debug_parts: list[str] = []
+        max_workers = min(len(chunks), self._MAX_PARALLEL_CHUNKS)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_chunk = {
-                executor.submit(
-                    self._decode_chunk, chunk, source_lang, target_lang, natural_translation,
-                ): chunk
+                executor.submit(self._decode_chunk, chunk, source_lang, target_lang): chunk
                 for chunk in chunks
             }
             for future in concurrent.futures.as_completed(future_to_chunk):
                 try:
                     result = future.result()
-                    all_line_results.update(result.get("line_results", {}))
-                    comments = result.get("comments", "")
-                    if comments:
-                        all_comments.append(comments)
+                    line_results.update(result.get("line_results", {}))
+                    c = result.get("comments", "")
+                    if c:
+                        comments_parts.append(c)
+                    if self.debug and result.get("raw_payload") is not None:
+                        debug_parts.append(
+                            json.dumps(result["raw_payload"], indent=2, ensure_ascii=False)
+                        )
                 except Exception as exc:
-                    chunk = future_to_chunk[future]
-                    all_comments.append(f"[Chunk error: {exc}]")
+                    comments_parts.append(f"[Chunk error: {exc}]")
 
-        # Assemble final output preserving original line order
-        decoded_lines = []
-        for i, raw_line in enumerate(raw_lines):
-            line = raw_line.strip()
-            if not line:
-                decoded_lines.append("")
-                continue
-            lr = all_line_results.get(i, {"words": [], "comments": ""})
-            tokens = self._tokenize(line)
-            translated_words = lr.get("words", [])
-            pairs = [
-                TokenPair(source_token=src, target_token=tgt)
-                for src, tgt in zip(tokens, translated_words)
-            ]
-            decoded_lines.append(self._format_aligned(pairs, max_line_length=max_line_length))
-
-        return DecoderResult(
-            aligned_text="\n".join(decoded_lines),
-            comments="\n\n".join(all_comments),
+        return self._assemble(
+            pre, line_results, max_line_length,
+            comments="\n\n".join(comments_parts),
+            debug_info="\n\n--- chunk ---\n\n".join(debug_parts),
         )
 
     def _decode_chunk(
         self,
-        chunk: list[tuple[int, str]],
+        chunk: list[PreprocessedLine],
         source_lang: str,
         target_lang: str,
-        natural_translation: str,
     ) -> dict:
-        """Decode a chunk of lines via translate_birkenbihl_full.
+        """Send one chunk to `translate_birkenbihl_full` and remap indices.
 
-        Returns line_results keyed by the ORIGINAL line index (not chunk-local).
+        The LLM service returns `line_results` keyed by indices into the chunk
+        text's split-by-newline lines (0…N-1). We remap those keys back to the
+        chunk lines' original `raw_idx` in the user's input.
         """
-        chunk_text = "\n".join(line for _, line in chunk)
+        chunk_text = "\n".join(p.content for p in chunk)
         raw_result = self.translation_service.translate_birkenbihl_full(
-            chunk_text, source_lang, target_lang, natural_translation,
+            chunk_text, source_lang, target_lang,
         )
-        # Re-key from chunk-local indices (0, 1, 2 …) to original text indices
-        chunk_local = raw_result.get("line_results", {})
-        remapped: dict[int, dict] = {}
+        chunk_local = raw_result.get("line_results", {}) or {}
         local_indices = sorted(chunk_local.keys())
-        for j, orig_idx in enumerate(idx for idx, _ in chunk):
+        remapped: dict[int, dict] = {}
+        for j, p in enumerate(chunk):
             if j < len(local_indices):
-                remapped[orig_idx] = chunk_local[local_indices[j]]
-        return {"line_results": remapped, "comments": raw_result.get("comments", "")}
+                remapped[p.raw_idx] = chunk_local[local_indices[j]]
+        return {
+            "line_results": remapped,
+            "comments": raw_result.get("comments", ""),
+            "raw_payload": raw_result.get("raw_payload"),
+        }
 
-    def _decode_batch(
+    # ------------------------------------------------------------------
+    # Per-word fallback path (Google / Argos)
+    # ------------------------------------------------------------------
+
+    def _decode_per_word(
         self,
-        text: str,
+        pre: list[PreprocessedLine],
         source_lang: str,
         target_lang: str,
         max_line_length: int,
     ) -> DecoderResult:
-        """Batch path: all non-empty lines dispatched in parallel, one LLM call each."""
-        raw_lines = text.split("\n")
-        non_empty = [(i, line.strip()) for i, line in enumerate(raw_lines) if line.strip()]
-
-        # Dispatch all lines concurrently (I/O-bound LLM calls → threads work well).
         line_results: dict[int, dict] = {}
-        all_comments: list[str] = []
-
-        max_workers = min(len(non_empty), 8)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_idx = {
-                executor.submit(
-                    self.translation_service.translate_birkenbihl, line, source_lang, target_lang
-                ): i
-                for i, line in non_empty
-            }
-            for future in concurrent.futures.as_completed(future_to_idx):
-                idx = future_to_idx[future]
-                try:
-                    line_results[idx] = future.result()
-                except Exception as exc:
-                    all_comments.append(f"[Line {idx + 1} error: {exc}]")
-                    line_results[idx] = {"words": [], "comments": ""}
-
-        decoded_lines = []
-        for i, raw_line in enumerate(raw_lines):
-            line = raw_line.strip()
-            if not line:
-                decoded_lines.append("")
+        for p in pre:
+            if not p.content:
                 continue
-            result = line_results[i]
-            tokens = self._tokenize(line)
-            translated_words = result.get("words", [])
-            comments = result.get("comments", "")
-            if comments:
-                all_comments.append(comments)
+            tokens = self._tokenize(p.content)
+            pairs = self._translate_tokens(tokens, source_lang, target_lang)
+            line_results[p.raw_idx] = {"words": [pair.target_token for pair in pairs]}
+        return self._assemble(pre, line_results, max_line_length, comments="")
+
+    # ------------------------------------------------------------------
+    # Assembly & formatting
+    # ------------------------------------------------------------------
+
+    def _assemble(
+        self,
+        pre: list[PreprocessedLine],
+        line_results: dict[int, dict],
+        max_line_length: int,
+        comments: str,
+        debug_info: str = "",
+    ) -> DecoderResult:
+        """Build the aligned output preserving original line order + list markers."""
+        out: list[str] = []
+        for p in pre:
+            if not p.content:
+                out.append("")
+                continue
+            tokens = self._tokenize(p.content)
+            translated_words = line_results.get(p.raw_idx, {}).get("words", [])
             pairs = [
                 TokenPair(source_token=src, target_token=tgt)
                 for src, tgt in zip(tokens, translated_words)
             ]
-            decoded_lines.append(self._format_aligned(pairs, max_line_length=max_line_length))
-
+            aligned = self._format_aligned(pairs, max_line_length=max_line_length)
+            if p.leading_marker:
+                aligned = self._prepend_marker(aligned, p.leading_marker)
+            out.append(aligned)
         return DecoderResult(
-            aligned_text="\n".join(decoded_lines),
-            comments="\n\n".join(all_comments),
+            aligned_text="\n".join(out),
+            comments=comments,
+            debug_info=debug_info,
         )
 
-    def _decode_per_word(
-        self,
-        text: str,
-        source_lang: str,
-        target_lang: str,
-        max_line_length: int,
-    ) -> DecoderResult:
-        """Per-word fallback path (Google/Argos services)."""
-        decoded_lines = []
-        for line in text.split("\n"):
-            line = line.strip()
-            if not line:
-                decoded_lines.append("")
-                continue
-            tokens = self._tokenize(line)
-            pairs = self._translate_tokens(tokens, source_lang, target_lang)
-            decoded_lines.append(self._format_aligned(pairs, max_line_length=max_line_length))
-        return DecoderResult(aligned_text="\n".join(decoded_lines), comments="")
+    @staticmethod
+    def _prepend_marker(aligned: str, marker: str) -> str:
+        """Prefix the first line with the marker; indent every following non-empty line."""
+        indent = " " * (len(marker) + 1)
+        lines = aligned.split("\n")
+        if not lines:
+            return aligned
+        lines[0] = f"{marker} {lines[0]}"
+        for i in range(1, len(lines)):
+            if lines[i]:
+                lines[i] = f"{indent}{lines[i]}"
+        return "\n".join(lines)
 
-    # Methods starting with _ are "private" - meant for internal use only
     def _tokenize(self, text: str) -> List[str]:
-        """Split text into individual words.
-        
-        Args:
-            text: Input text to split
-            
-        Returns:
-            List of words (tokens)
-            
-        Example:
-            "hello world" → ["hello", "world"]
-        """
-        # Simple whitespace tokenization (can be improved later)
-        # .split() without arguments splits on any whitespace and removes empty strings
         return text.split()
 
     def _translate_tokens(
-        self,
-        tokens: List[str],  # List of words to translate
-        source_lang: str,   # Source language code
-        target_lang: str,   # Target language code
+        self, tokens: List[str], source_lang: str, target_lang: str,
     ) -> List[TokenPair]:
-        """Translate each token and create TokenPair objects.
-        
-        Args:
-            tokens: List of words to translate
-            source_lang: Source language code (e.g., "en")
-            target_lang: Target language code (e.g., "de")
-            
-        Returns:
-            List of TokenPair objects (original word + translation)
-        """
-        # Create an empty list to store the pairs
         pairs: List[TokenPair] = []
-        
-        # Loop through each word
         for token in tokens:
-            # try-except block handles errors gracefully
             try:
-                # Call the translation service to translate this word
                 translated = self.translation_service.translate_word(
-                    token, source_lang=source_lang, target_lang=target_lang
+                    token, source_lang=source_lang, target_lang=target_lang,
                 ) or token
             except Exception as exc:
-                # If translation fails, use an error message instead
-                # f"..." is an f-string: formats the exception into the string
                 translated = f"[ERR:{exc}]"
-            
-            # Create a TokenPair and add it to our list
             pairs.append(TokenPair(source_token=token, target_token=translated))
-        
         return pairs
 
     def _format_aligned(self, pairs: List[TokenPair], max_line_length: int) -> str:
-        """
-        Creates aligned two-line output with optional line breaks.
-        
-        Example output:
-            hello  world  how
-            hallo  Welt   wie
-            
-            are   you
-            bist  du
-
-        Line breaking rule:
-          - We keep a running sum of widths; when it reaches/exceeds max_line_length,
-            we flush the current two lines.
-          - If max_line_length <= 0: never force line breaks (single block).
-        """
-        # Special case: no line breaks wanted
+        """Two-line aligned output with optional line wrapping at max_line_length."""
         if max_line_length <= 0:
             return self._format_single_block(pairs)
 
-        # List to collect all output lines
         output_lines: List[str] = []
-        
-        # Variables to build current line pair
-        source_line = ""     # Current source language line being built
-        target_line = ""     # Current target language line being built
-        running_width = 0    # Track how many characters we've used so far
+        source_line = ""
+        target_line = ""
+        running_width = 0
 
-        # Process each word pair
         for pair in pairs:
-            # Get the width needed for this column (length of longer word)
             width = pair.column_width
-            
-            # .ljust(width) pads the string with spaces to reach 'width' characters
-            # Example: "hi".ljust(5) → "hi   "
             source_chunk = pair.source_token.ljust(width) + " "
             target_chunk = pair.target_token.ljust(width) + " "
 
-            # Check: would adding this word (with space) exceed our line length limit?
-            # We check if adding width+1 (word + space) would exceed the limit
             if running_width > 0 and running_width + width + 1 > max_line_length:
-                # Yes! Save current lines and start new ones
-                # .rstrip() removes trailing spaces
                 output_lines.append(source_line.rstrip())
                 output_lines.append(target_line.rstrip())
-                output_lines.append("")  # Add blank line between blocks
-                
-                # Reset for next line
+                output_lines.append("")
                 source_line = ""
                 target_line = ""
                 running_width = 0
 
-            # Add the word chunks to current lines
             source_line += source_chunk
             target_line += target_chunk
-            running_width += width + 1  # +1 for the space after each word
+            running_width += width + 1
 
-        # Don't forget the last line if there's anything left
         if source_line or target_line:
             output_lines.append(source_line.rstrip())
             output_lines.append(target_line.rstrip())
-            output_lines.append("")  # Blank line at end
+            output_lines.append("")
 
-        # Join all lines with newline characters
-        # .rstrip() removes trailing newlines, then we add one back
         return "\n".join(output_lines).rstrip() + "\n"
 
     def _format_single_block(self, pairs: List[TokenPair]) -> str:
-        """Format all pairs into a single two-line block (no line breaks).
-        
-        Used when max_line_length is 0 or negative.
-        
-        Returns:
-            Two lines: source words on top, translations below, aligned by column
-        """
-        source_line = ""  # Build the top line (original language)
-        target_line = ""  # Build the bottom line (translation)
-        
-        # Process all pairs at once (no line breaking)
+        source_line = ""
+        target_line = ""
         for pair in pairs:
-            # Get column width for alignment
             width = pair.column_width
-            
-            # Add word padded to column width + extra space
             source_line += pair.source_token.ljust(width) + " "
             target_line += pair.target_token.ljust(width) + " "
-        
-        # Return both lines with trailing spaces removed
-        # \n is newline character
-        return (source_line.rstrip() + "\n" + target_line.rstrip() + "\n")
+        return source_line.rstrip() + "\n" + target_line.rstrip() + "\n"

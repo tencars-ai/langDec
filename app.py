@@ -33,37 +33,59 @@ def _get_services():
 
 
 def _load_llm_service(db, auth, build_llm_service, user_id: str) -> None:
+    """Load every configured LLM provider for this user into session state.
+
+    Populates `st.session_state.llm_services` as {service.name: service}.
+    Also keeps `st.session_state.llm_service` set to the most-recently-created
+    one for backward compat with code that reads the singular key.
+    """
     rows = db.execute(
         "SELECT provider, api_key_encrypted FROM user_api_keys WHERE user_id = %s ORDER BY created_at DESC",
         (user_id,),
     )
+    services: dict = {}
     for row in rows:
         try:
             decrypted = auth.decrypt_api_key(bytes(row["api_key_encrypted"]))
-            st.session_state.llm_service = build_llm_service(row["provider"], decrypted)
-            break
+            svc = build_llm_service(row["provider"], decrypted)
+            services[svc.name] = svc
         except Exception:
             continue
+    st.session_state.llm_services = services
+    st.session_state.llm_service = next(iter(services.values()), None)
 
 
 def _init_preferences(db, user_id: str) -> None:
-    """Set default service selections based on configured API keys."""
-    if "translate_service_name" not in st.session_state:
-        st.session_state.translate_service_name = "Google Translate"
-    if "decode_service_name" not in st.session_state:
+    """Load persisted preferences from DB, falling back to sensible defaults.
+
+    A missing user_preferences table (e.g. migration 006 not yet applied) must
+    not block login — fall back to defaults silently in that case.
+    """
+    from services.preferences_service import PreferencesService
+    try:
+        persisted = PreferencesService(db).load(user_id)
+    except Exception:
+        persisted = {}
+
+    def _decode_default() -> str:
         providers = {r["provider"] for r in db.execute(
             "SELECT provider FROM user_api_keys WHERE user_id = %s", (user_id,)
         )}
         if "anthropic" in providers:
-            st.session_state.decode_service_name = "Claude (Anthropic)"
-        elif "openai" in providers:
-            st.session_state.decode_service_name = "OpenAI"
-        else:
-            st.session_state.decode_service_name = "Google Translate"
-    if "max_line_length" not in st.session_state:
-        st.session_state.max_line_length = 65
-    if "ocr_line_height_threshold" not in st.session_state:
-        st.session_state.ocr_line_height_threshold = 30
+            return "Claude (Anthropic)"
+        if "openai" in providers:
+            return "OpenAI"
+        return "Google Translate"
+
+    st.session_state.translate_service_name = (
+        persisted.get("translate_service_name") or "Google Translate"
+    )
+    st.session_state.decode_service_name = (
+        persisted.get("decode_service_name") or _decode_default()
+    )
+    st.session_state.max_line_length = persisted.get("max_line_length", 65)
+    st.session_state.ocr_line_height_threshold = persisted.get("ocr_line_height_threshold", 30)
+    st.session_state.debug_mode = persisted.get("debug_mode", False)
 
 
 # -------------------------------------------------------
@@ -97,15 +119,15 @@ with tab_login:
                 db, auth, build_llm = _get_services()
                 identifier = login_id.strip()
                 user = db.execute_one(
-                    "SELECT id, username, password_hash FROM users"
+                    "SELECT user_id, username, password_hash FROM users"
                     " WHERE username = %s OR email = %s",
                     (identifier, identifier),
                 )
                 if user and auth.verify_password(password, user["password_hash"]):
-                    st.session_state.user_id = str(user["id"])
+                    st.session_state.user_id = str(user["user_id"])
                     st.session_state.username = user["username"] or identifier
-                    _load_llm_service(db, auth, build_llm, str(user["id"]))
-                    _init_preferences(db, str(user["id"]))
+                    _load_llm_service(db, auth, build_llm, str(user["user_id"]))
+                    _init_preferences(db, str(user["user_id"]))
                     st.rerun()
                 else:
                     st.error("Invalid username/email or password.")
@@ -135,26 +157,27 @@ with tab_register:
             try:
                 db, auth, build_llm = _get_services()
                 existing_user = db.execute_one(
-                    "SELECT id FROM users WHERE username = %s", (new_username.strip(),)
+                    "SELECT user_id FROM users WHERE username = %s", (new_username.strip(),)
                 )
                 if existing_user:
                     st.error("Username already taken.")
                 else:
                     existing_email = db.execute_one(
-                        "SELECT id FROM users WHERE email = %s", (new_email.strip(),)
+                        "SELECT user_id FROM users WHERE email = %s", (new_email.strip(),)
                     )
                     if existing_email:
                         st.error("An account with this email already exists.")
                     else:
                         pw_hash = auth.hash_password(new_pw)
                         user = db.execute_returning(
-                            "INSERT INTO users (username, email, password_hash) VALUES (%s, %s, %s) RETURNING id",
+                            "INSERT INTO users (username, email, password_hash) VALUES (%s, %s, %s) RETURNING user_id",
                             (new_username.strip(), new_email.strip(), pw_hash),
                         )
-                        st.session_state.user_id = str(user["id"])
+                        st.session_state.user_id = str(user["user_id"])
                         st.session_state.username = new_username.strip()
                         st.session_state.llm_service = None
-                        _init_preferences(db, str(user["id"]))
+                        st.session_state.llm_services = {}
+                        _init_preferences(db, str(user["user_id"]))
                         st.rerun()
             except Exception as e:
                 st.error(f"Registration failed: {e}")

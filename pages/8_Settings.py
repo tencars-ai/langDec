@@ -7,6 +7,7 @@ from utils.styles import inject_styles
 from services.db_service import DBService
 from services.auth_service import AuthService
 from services.llm_service import build_llm_service
+from services.preferences_service import PreferencesService
 
 st.set_page_config(page_title="langDec – Settings", layout="wide")
 
@@ -29,12 +30,49 @@ FALLBACK_SERVICES = {
     "Google Translate": GoogleDeepTranslatorService(),
     "Argos Translate": ArgosTranslateService(),
 }
-_llm = st.session_state.get("llm_service")
-ALL_SERVICES = {**FALLBACK_SERVICES}
-if _llm:
-    ALL_SERVICES[_llm.name] = _llm
+llm_services = st.session_state.get("llm_services") or {}
 
-st.subheader("Decoding Service")
+# Lazy-load LLM services from DB if not yet in session (e.g. after hot-reload without re-login,
+# or sessions started before llm_services was introduced).
+_db_keys = db.execute(
+    "SELECT provider, api_key_encrypted FROM user_api_keys WHERE user_id = %s", (user_id,)
+)
+_db_providers = {r["provider"] for r in _db_keys}
+_loaded_providers = {getattr(s, "provider", None) for s in llm_services.values()}
+_missing = _db_providers - {p for p in _loaded_providers if p}
+_decrypt_failed: set[str] = set()
+if _missing:
+    for row in _db_keys:
+        if row["provider"] not in _missing:
+            continue
+        try:
+            decrypted = auth.decrypt_api_key(bytes(row["api_key_encrypted"]))
+            svc = build_llm_service(row["provider"], decrypted)
+            llm_services[svc.name] = svc
+        except Exception:
+            _decrypt_failed.add(row["provider"])
+    st.session_state.llm_services = llm_services
+
+ALL_SERVICES = {**FALLBACK_SERVICES, **llm_services}
+
+if _decrypt_failed:
+    st.warning(
+        f"API keys for {', '.join(sorted(_decrypt_failed))} are stored but could not be decrypted "
+        "(SECRET_KEY may have changed). Re-save the key below to fix."
+    )
+
+header_col, save_col = st.columns([4, 1])
+with header_col:
+    st.subheader("Preferences")
+with save_col:
+    save_clicked = st.button(
+        "Save preferences",
+        type="primary",
+        use_container_width=True,
+        key="save_preferences_btn",
+    )
+
+st.markdown("**Decoding Service**")
 st.caption("Used for word-by-word decoding (Birkenbihl method). LLM gives best quality.")
 
 decode_options = list(ALL_SERVICES.keys())
@@ -42,7 +80,7 @@ decode_default = st.session_state.get("decode_service_name", decode_options[0])
 decode_index = decode_options.index(decode_default) if decode_default in decode_options else 0
 selected_decode = st.radio("Decoding service", decode_options, index=decode_index, horizontal=True, key="decode_service_radio")
 
-st.subheader("Decoder Output")
+st.markdown("**Decoder Output**")
 max_line_length = st.number_input(
     "Line break after number of characters (0 = disabled)",
     min_value=0, max_value=300,
@@ -51,7 +89,7 @@ max_line_length = st.number_input(
     key="max_line_length_input",
 )
 
-st.subheader("OCR")
+st.markdown("**OCR**")
 ocr_threshold = st.number_input(
     "Line height threshold (pixels)",
     min_value=10, max_value=100,
@@ -60,8 +98,7 @@ ocr_threshold = st.number_input(
     key="ocr_threshold_input",
 )
 
-st.markdown("---")
-st.subheader("Translation Service")
+st.markdown("**Translation Service**")
 st.caption("Used for natural/contextual translation.")
 
 translate_options = list(ALL_SERVICES.keys())
@@ -69,12 +106,32 @@ translate_default = st.session_state.get("translate_service_name", "Google Trans
 translate_index = translate_options.index(translate_default) if translate_default in translate_options else 0
 selected_translate = st.radio("Translation service", translate_options, index=translate_index, horizontal=True, key="translate_service_radio")
 
-if st.button("Save preferences", type="primary"):
-    st.session_state.decode_service_name = selected_decode
-    st.session_state.translate_service_name = selected_translate
-    st.session_state.max_line_length = max_line_length
-    st.session_state.ocr_line_height_threshold = ocr_threshold
-    st.success("Preferences saved.")
+st.markdown("**Debug**")
+debug_mode = st.checkbox(
+    "Show raw LLM response in Decode page",
+    value=st.session_state.get("debug_mode", False),
+    key="debug_mode_input",
+    help="When enabled, the Decode page shows the raw JSON payload returned by the LLM. Useful for prompt tuning.",
+)
+
+if save_clicked:
+    try:
+        PreferencesService(db).save(
+            user_id,
+            decode_service_name=selected_decode,
+            translate_service_name=selected_translate,
+            max_line_length=max_line_length,
+            ocr_line_height_threshold=ocr_threshold,
+            debug_mode=debug_mode,
+        )
+        st.session_state.decode_service_name = selected_decode
+        st.session_state.translate_service_name = selected_translate
+        st.session_state.max_line_length = max_line_length
+        st.session_state.ocr_line_height_threshold = ocr_threshold
+        st.session_state.debug_mode = debug_mode
+        st.success("Preferences saved.")
+    except Exception as e:
+        st.error(f"Could not save preferences: {e}")
 
 st.markdown("---")
 
@@ -86,7 +143,7 @@ st.caption("API keys are encrypted before storage. They are only decrypted in yo
 
 for provider, label in [("openai", "OpenAI"), ("anthropic", "Anthropic (Claude)")]:
     existing = db.execute_one(
-        "SELECT id FROM user_api_keys WHERE user_id = %s AND provider = %s",
+        "SELECT api_key_id FROM user_api_keys WHERE user_id = %s AND provider = %s",
         (user_id, provider),
     )
     status = "Configured" if existing else "Not set"
@@ -111,6 +168,9 @@ for provider, label in [("openai", "OpenAI"), ("anthropic", "Anthropic (Claude)"
                     try:
                         svc = build_llm_service(provider, new_key.strip())
                         st.session_state.llm_service = svc
+                        services = st.session_state.get("llm_services") or {}
+                        services[svc.name] = svc
+                        st.session_state.llm_services = services
                     except Exception:
                         pass
                     st.success(f"{label} key saved.")
@@ -149,13 +209,13 @@ if submitted:
         st.error("New password must be at least 8 characters.")
     else:
         user = db.execute_one(
-            "SELECT password_hash FROM users WHERE id = %s",
+            "SELECT password_hash FROM users WHERE user_id = %s",
             (user_id,),
         )
         if user and auth.verify_password(current_pw, user["password_hash"]):
             new_hash = auth.hash_password(new_pw)
             db.execute_write(
-                "UPDATE users SET password_hash = %s WHERE id = %s",
+                "UPDATE users SET password_hash = %s WHERE user_id = %s",
                 (new_hash, user_id),
             )
             st.success("Password updated.")
@@ -178,9 +238,9 @@ if delete_submitted:
     if not confirm_check:
         st.error("Please check the confirmation box.")
     else:
-        user = db.execute_one("SELECT password_hash FROM users WHERE id = %s", (user_id,))
+        user = db.execute_one("SELECT password_hash FROM users WHERE user_id = %s", (user_id,))
         if user and auth.verify_password(confirm_pw, user["password_hash"]):
-            db.execute_write("DELETE FROM users WHERE id = %s", (user_id,))
+            db.execute_write("DELETE FROM users WHERE user_id = %s", (user_id,))
             st.session_state.clear()
             st.success("Account deleted.")
             st.rerun()

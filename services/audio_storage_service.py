@@ -30,11 +30,11 @@ class AudioStorageService:
             INSERT INTO audio_files
                 (user_id, text_id, language, tts_service, data, file_size_bytes)
             VALUES (%s, %s, %s, %s, %s, %s)
-            RETURNING id
+            RETURNING audio_file_id
             """,
             (user_id, text_id, language, tts_service, data, len(data)),
         )
-        return str(row["id"])
+        return str(row["audio_file_id"])
 
     def get(self, audio_id: str, user_id: str) -> Optional[bytes]:
         """
@@ -42,7 +42,7 @@ class AudioStorageService:
         Returns None if not found.
         """
         row = self._db.execute_one(
-            "SELECT data FROM audio_files WHERE id = %s AND user_id = %s",
+            "SELECT data FROM audio_files WHERE audio_file_id = %s AND user_id = %s",
             (audio_id, user_id),
         )
         return bytes(row["data"]) if row else None
@@ -62,7 +62,7 @@ class AudioStorageService:
         """
         return self._db.execute(
             """
-            SELECT id, text_id, language, tts_service, file_size_bytes, created_at
+            SELECT audio_file_id, text_id, language, tts_service, file_size_bytes, created_at
             FROM audio_files
             WHERE user_id = %s
             ORDER BY created_at DESC
@@ -73,6 +73,6 @@ class AudioStorageService:
     def delete(self, audio_id: str, user_id: str) -> None:
         """Delete an audio file (scoped to user_id)."""
         self._db.execute_write(
-            "DELETE FROM audio_files WHERE id = %s AND user_id = %s",
+            "DELETE FROM audio_files WHERE audio_file_id = %s AND user_id = %s",
             (audio_id, user_id),
         )

@@ -32,11 +32,12 @@ class FlashcardBox:
         """Return cards due for review (next_review <= NOW()), with word data."""
         return self._db.execute(
             """
-            SELECT vc.id, vc.box_number, vc.last_reviewed, vc.next_review,
-                   ud.word_source, ud.word_target, ud.lang_source, ud.lang_target,
+            SELECT vc.vocab_card_id, vc.box_number, vc.last_reviewed, vc.next_review,
+                   ud.source_word, ud.target_word, ud.source_language, ud.target_language,
                    ud.word_class, ud.word_target_decoded, ud.example_sentence, ud.explanation
             FROM vocab_cards vc
-            JOIN user_dictionary ud ON ud.id = vc.dictionary_entry_id
+            JOIN user_dictionary ud
+                 ON ud.user_dictionary_id = vc.user_dictionary_id
             WHERE vc.user_id = %s
               AND vc.next_review <= NOW()
             ORDER BY vc.next_review ASC
@@ -68,7 +69,7 @@ class FlashcardBox:
         Cards already in box 3 stay in box 3.
         """
         card = self._db.execute_one(
-            "SELECT box_number FROM vocab_cards WHERE id = %s AND user_id = %s",
+            "SELECT box_number FROM vocab_cards WHERE vocab_card_id = %s AND user_id = %s",
             (card_id, user_id),
         )
         if not card:
@@ -80,7 +81,7 @@ class FlashcardBox:
             SET box_number = %s,
                 last_reviewed = NOW(),
                 next_review = %s
-            WHERE id = %s AND user_id = %s
+            WHERE vocab_card_id = %s AND user_id = %s
             """,
             (new_box, _next_review(new_box), card_id, user_id),
         )
@@ -93,7 +94,7 @@ class FlashcardBox:
             SET box_number = 1,
                 last_reviewed = NOW(),
                 next_review = %s
-            WHERE id = %s AND user_id = %s
+            WHERE vocab_card_id = %s AND user_id = %s
             """,
             (_next_review(1), card_id, user_id),
         )

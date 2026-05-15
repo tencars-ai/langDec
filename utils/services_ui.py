@@ -18,22 +18,26 @@ def _fallback_services() -> dict:
     }
 
 
-def get_decode_service():
-    """Return the TranslationService to use for decoding."""
-    name = st.session_state.get("decode_service_name", "Google Translate")
+def _resolve(name: str):
+    """Look up a service by display name across LLMs and fallbacks."""
+    llm_services = st.session_state.get("llm_services") or {}
+    if name in llm_services:
+        return llm_services[name]
+    # Backward-compat with old singular session key.
     llm = st.session_state.get("llm_service")
     if llm and name == llm.name:
         return llm
     return _fallback_services().get(name, GoogleDeepTranslatorService())
+
+
+def get_decode_service():
+    """Return the TranslationService to use for decoding."""
+    return _resolve(st.session_state.get("decode_service_name", "Google Translate"))
 
 
 def get_translate_service():
     """Return the TranslationService to use for translation."""
-    name = st.session_state.get("translate_service_name", "Google Translate")
-    llm = st.session_state.get("llm_service")
-    if llm and name == llm.name:
-        return llm
-    return _fallback_services().get(name, GoogleDeepTranslatorService())
+    return _resolve(st.session_state.get("translate_service_name", "Google Translate"))
 
 
 def get_max_line_length() -> int:

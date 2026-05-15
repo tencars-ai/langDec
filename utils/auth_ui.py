@@ -9,7 +9,7 @@ def require_login() -> None:
     if "user_id" not in st.session_state:
         st.warning("Please log in first.")
         if st.button("Go to Login", type="primary"):
-            st.switch_page("app.py")
+            st.rerun()
         st.stop()
 
 
@@ -21,4 +21,4 @@ def render_sidebar() -> None:
             st.markdown(f"**{username}**")
         if st.button("Logout", use_container_width=True):
             st.session_state.clear()
-            st.switch_page("app.py")
+            st.rerun()

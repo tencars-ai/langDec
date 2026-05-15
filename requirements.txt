@@ -13,3 +13,4 @@ anthropic
 gtts
 bcrypt
 cryptography
+PyYAML

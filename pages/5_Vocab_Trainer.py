@@ -59,15 +59,15 @@ else:
     st.markdown(f"**Card {idx + 1} / {len(cards)}**  —  Box {card['box_number']}")
     st.markdown("---")
 
-    st.markdown(f"### {card['word_source']}")
-    st.caption(f"{card['lang_source']} → {card['lang_target']}")
+    st.markdown(f"### {card['source_word']}")
+    st.caption(f"{card['source_language']} → {card['target_language']}")
 
     if not st.session_state.trainer_revealed:
         if st.button("Reveal answer", type="primary", use_container_width=True):
             st.session_state.trainer_revealed = True
             st.rerun()
     else:
-        st.markdown(f"**Natural:** {card['word_target']}")
+        st.markdown(f"**Natural:** {card['target_word']}")
         if card.get("word_target_decoded"):
             st.markdown(f"**Decoded:** {card['word_target_decoded']}")
         if card.get("word_class"):
@@ -81,13 +81,13 @@ else:
         c1, c2 = st.columns(2)
         with c1:
             if st.button("Correct", type="primary", use_container_width=True):
-                flashcard.mark_correct(user_id, str(card["id"]))
+                flashcard.mark_correct(user_id, str(card["vocab_card_id"]))
                 st.session_state.trainer_index += 1
                 st.session_state.trainer_revealed = False
                 st.rerun()
         with c2:
             if st.button("Incorrect", use_container_width=True):
-                flashcard.mark_incorrect(user_id, str(card["id"]))
+                flashcard.mark_incorrect(user_id, str(card["vocab_card_id"]))
                 st.session_state.trainer_index += 1
                 st.session_state.trainer_revealed = False
                 st.rerun()

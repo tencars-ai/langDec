@@ -70,38 +70,38 @@ if not audio_files:
 else:
     for af in audio_files:
         size_kb = (af["file_size_bytes"] or 0) // 1024
-        label = f"{str(af['id'])[:8]}…  |  {af['language'].upper()}  |  {size_kb} KB  |  {str(af['created_at'])[:19]}"
+        label = f"{str(af['audio_file_id'])[:8]}…  |  {af['language'].upper()}  |  {size_kb} KB  |  {str(af['created_at'])[:19]}"
         with st.expander(label, expanded=False):
             col_a, col_b, col_c = st.columns(3)
             with col_a:
-                if st.button("Play", key=f"play_{af['id']}"):
-                    data = audio_storage.get(str(af["id"]), user_id)
+                if st.button("Play", key=f"play_{af['audio_file_id']}"):
+                    data = audio_storage.get(str(af["audio_file_id"]), user_id)
                     if data:
                         st.audio(data, format="audio/mp3")
             with col_b:
-                data = audio_storage.get(str(af["id"]), user_id)
+                data = audio_storage.get(str(af["audio_file_id"]), user_id)
                 if data:
                     st.download_button(
                         "Download MP3",
                         data=data,
-                        file_name=f"audio_{str(af['id'])[:8]}.mp3",
+                        file_name=f"audio_{str(af['audio_file_id'])[:8]}.mp3",
                         mime="audio/mp3",
-                        key=f"dl_{af['id']}",
+                        key=f"dl_{af['audio_file_id']}",
                     )
             with col_c:
-                if st.session_state.get(f"confirm_del_audio_{af['id']}"):
+                if st.session_state.get(f"confirm_del_audio_{af['audio_file_id']}"):
                     st.warning("Are you sure?")
                     c1, c2 = st.columns(2)
                     with c1:
-                        if st.button("Yes", key=f"del_confirm_{af['id']}", type="primary"):
-                            audio_storage.delete(str(af["id"]), user_id)
-                            st.session_state.pop(f"confirm_del_audio_{af['id']}", None)
+                        if st.button("Yes", key=f"del_confirm_{af['audio_file_id']}", type="primary"):
+                            audio_storage.delete(str(af["audio_file_id"]), user_id)
+                            st.session_state.pop(f"confirm_del_audio_{af['audio_file_id']}", None)
                             st.rerun()
                     with c2:
-                        if st.button("Cancel", key=f"del_cancel_{af['id']}"):
-                            st.session_state.pop(f"confirm_del_audio_{af['id']}", None)
+                        if st.button("Cancel", key=f"del_cancel_{af['audio_file_id']}"):
+                            st.session_state.pop(f"confirm_del_audio_{af['audio_file_id']}", None)
                             st.rerun()
                 else:
-                    if st.button("Delete", key=f"del_{af['id']}"):
-                        st.session_state[f"confirm_del_audio_{af['id']}"] = True
+                    if st.button("Delete", key=f"del_{af['audio_file_id']}"):
+                        st.session_state[f"confirm_del_audio_{af['audio_file_id']}"] = True
                         st.rerun()

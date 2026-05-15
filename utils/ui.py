@@ -45,57 +45,60 @@ def save_to_library(
     """
     from services.db_service import DBService
 
-    with st.expander("Save to text library", expanded=False):
+    st.markdown("#### 💾 Save to text library")
+    with st.container():
         db = DBService()
         title = st.text_input("Title", value=default_title, key=f"{key_prefix}_title")
 
         folders = db.execute(
-            "SELECT id, name FROM folders WHERE user_id = %s ORDER BY name",
+            "SELECT folder_id, name FROM folders WHERE user_id = %s ORDER BY name",
             (user_id,),
         )
-        folder_options = {"(No folder)": None, **{f["name"]: str(f["id"]) for f in folders}}
+        _NEW_FOLDER_SENTINEL = "__new_folder__"
+        folder_options = {
+            "(No folder)": None,
+            **{f["name"]: str(f["folder_id"]) for f in folders},
+            "<Create New Folder>": _NEW_FOLDER_SENTINEL,
+        }
 
-        col_folder, col_new = st.columns([3, 1])
-        with col_folder:
-            folder_label = st.selectbox("Folder", list(folder_options.keys()), key=f"{key_prefix}_folder")
-        with col_new:
-            st.markdown("&nbsp;", unsafe_allow_html=True)
-            show_new_folder = st.toggle("New folder", key=f"{key_prefix}_show_new_folder")
+        folder_label = st.selectbox(
+            "Folder", list(folder_options.keys()), key=f"{key_prefix}_folder",
+        )
+        is_new_folder = folder_options[folder_label] == _NEW_FOLDER_SENTINEL
 
-        if show_new_folder:
-            new_folder_col, new_folder_btn_col = st.columns([3, 1])
-            with new_folder_col:
-                new_folder_name = st.text_input(
-                    "Folder name", placeholder="e.g. Portuguese texts",
-                    key=f"{key_prefix}_new_folder_name", label_visibility="collapsed",
-                )
-            with new_folder_btn_col:
-                if st.button("Create", key=f"{key_prefix}_create_folder_btn"):
-                    if new_folder_name.strip():
-                        try:
-                            db.execute_write(
-                                "INSERT INTO folders (user_id, name) VALUES (%s, %s)",
-                                (user_id, new_folder_name.strip()),
-                            )
-                            st.success(f"Folder '{new_folder_name}' created.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Failed: {e}")
-                    else:
-                        st.warning("Enter a folder name.")
+        new_folder_name = ""
+        if is_new_folder:
+            new_folder_name = st.text_input(
+                "New folder name", placeholder="e.g. Portuguese texts",
+                key=f"{key_prefix}_new_folder_name",
+            )
 
-        if st.button("Save text", type="primary", key=f"{key_prefix}_btn"):
-            if title.strip():
+        save_label = "Save Text to New Folder" if is_new_folder else "Save Text"
+        if st.button(save_label, type="primary", key=f"{key_prefix}_btn"):
+            if not title.strip():
+                st.warning("Please enter a title.")
+            elif is_new_folder and not new_folder_name.strip():
+                st.warning("Please enter a name for the new folder.")
+            else:
                 try:
+                    if is_new_folder:
+                        new_folder = db.execute_returning(
+                            "INSERT INTO folders (user_id, name) VALUES (%s, %s) RETURNING folder_id",
+                            (user_id, new_folder_name.strip()),
+                        )
+                        folder_id = str(new_folder["folder_id"])
+                    else:
+                        folder_id = folder_options[folder_label]
+
                     row = db.execute_returning(
                         "INSERT INTO texts"
                         " (user_id, folder_id, title, content, source_language,"
                         "  target_language, decoded_text, translated_text, notes)"
                         " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
-                        " RETURNING id",
+                        " RETURNING text_id",
                         (
                             user_id,
-                            folder_options[folder_label],
+                            folder_id,
                             title.strip(),
                             content,
                             source_language,
@@ -112,8 +115,11 @@ def save_to_library(
                             data=audio_bytes,
                             language=source_language,
                             tts_service="gtts",
-                            text_id=str(row["id"]),
+                            text_id=str(row["text_id"]),
                         )
-                    st.success(f"Saved as '{title}'.")
+                    if is_new_folder:
+                        st.success(f"Saved as '{title}' in new folder '{new_folder_name}'.")
+                    else:
+                        st.success(f"Saved as '{title}'.")
                 except Exception as e:
                     st.error(f"Failed: {e}")

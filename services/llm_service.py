@@ -1,27 +1,42 @@
 """
-LLM Service – abstract base class and OpenAI / Anthropic implementations.
+LLM Service — abstract base class and OpenAI / Anthropic implementations.
 Implements the TranslationService interface so it works as a drop-in with the
 existing WordByWordDecoder and Translator classes.
+
+Birkenbihl decoding uses a plain-text output format (no JSON, no tool-use).
+The LLM is asked to return one whitespace-tokenized line per source line.
+Hyphens mark multi-word targets for a single source word ("werden-wir");
+empty "[]" marks source words with no direct target equivalent.
+
+The per-line token count is verified by the parser; mismatched lines fall
+back to per-word translation.
 """
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from typing import Optional
 
-# Maps ISO codes to full language names used in LLM prompts.
-# Full names produce more reliable results than bare codes like "de" or "pt".
+from prompts import load_prompt_config
+from services.prompt_builder import build_system_prompt, build_user_prompt
+
+
+# Maps ISO codes to full language names for translate_word / translate_text.
+# Birkenbihl decoding uses prompts/<src>_<tgt>.yaml for richer naming.
 _LANG_NAMES: dict[str, str] = {
     "de": "German",
     "en": "English",
     "pt": "Portuguese",
+    "sv": "Swedish",
 }
 
 
+# ---------------------------------------------------------------------------
+# Abstract base
+# ---------------------------------------------------------------------------
+
 class LLMService(ABC):
-    """
-    Abstract base for LLM-backed translation and text generation.
-    Implements the TranslationService interface (translate_word, translate_text).
-    """
+    """Abstract base for LLM-backed translation and generation."""
 
     @property
     @abstractmethod
@@ -34,252 +49,203 @@ class LLMService(ABC):
         source_lang: str,
         target_lang: str,
         context: Optional[str] = None,
-    ) -> str:
-        """Translate a single word (word-by-word, literal)."""
-        ...
+    ) -> str: ...
 
     @abstractmethod
-    def translate_text(self, text: str, source_lang: str, target_lang: str) -> str:
-        """Contextual/natural translation of a full text."""
-        ...
+    def translate_text(self, text: str, source_lang: str, target_lang: str) -> str: ...
 
     @abstractmethod
-    def generate_text(self, prompt: str, language: str, difficulty: str) -> str:
-        """Generate a text or dialogue in the target language."""
-        ...
+    def generate_text(self, prompt: str, language: str, difficulty: str) -> str: ...
 
     @abstractmethod
-    def word_lookup(
-        self, word: str, source_lang: str, target_lang: str
+    def word_lookup(self, word: str, source_lang: str, target_lang: str) -> dict: ...
+
+    def translate_birkenbihl_full(
+        self, text: str, source_lang: str, target_lang: str,
     ) -> dict:
-        """
-        Detailed lookup for a single word.
-        Returns dict with keys: translation, word_class, example_sentence.
-        """
-        ...
+        """Full-text Birkenbihl decoding in one plain-text LLM call.
 
-    def translate_birkenbihl(
-        self, text: str, source_lang: str, target_lang: str
-    ) -> dict:
-        """
-        Batch Birkenbihl translation: send the full text in one LLM call.
-        Returns dict with keys:
-          - "words": list of translated tokens (1:1 with source tokens)
-          - "comments": any notes/explanations from the LLM (may be empty string)
-        Falls back to per-word translate_word() on parse errors.
+        Returns: {"line_results": {orig_idx: {"words": [...], "comments": ""}},
+                  "comments": "<aggregated notes/errors>",
+                  "raw_payload": {"raw_text": "...", "parsed_lines": [...]}}
         """
         raise NotImplementedError
 
 
 # ---------------------------------------------------------------------------
-# Shared helpers for batch Birkenbihl translation
+# Shared parser + fallback
 # ---------------------------------------------------------------------------
 
-def _birkenbihl_system_prompt(source_lang: str, target_lang: str) -> str:
-    src = _LANG_NAMES.get(source_lang, source_lang)
-    tgt = _LANG_NAMES.get(target_lang, target_lang)
-    return (
-        f"You are a strict word-for-word translator using the Birkenbihl decoding method.\n\n"
-        f"TASK: Translate each word of the given {src} text into {tgt}, one word at a time, "
-        f"preserving the EXACT original word order.\n\n"
-        "CRITICAL RULES:\n"
-        "1. Output EXACTLY ONE translation per source word — never merge two words, never split one word into two\n"
-        "2. Translate each word IN ISOLATION — do NOT rearrange words to match "
-        f"{tgt} grammar\n"
-        f"3. The result WILL sound grammatically broken in {tgt} — this is CORRECT and INTENDED\n"
-        "4. Use [ ] only for grammatical particles that have no direct equivalent\n"
-        "5. Do NOT use | inside any translation entry\n"
-        "6. Do NOT produce a natural translation — if the output sounds fluent, it is WRONG\n"
-        "7. Numbers written as digits (e.g. 1, 42, 1., 3.5) must be copied UNCHANGED — do not translate or spell them out\n"
-        "8. PRESERVE the capitalization pattern of the SOURCE word in your translation. "
-        "If the source word is lowercase (e.g. \"e\", \"no\", \"em\"), the translation MUST be lowercase "
-        "(e.g. \"und\", \"im\", \"in\"). Only capitalize if the source word itself is capitalized.\n"
-        "9. Use SENTENCE CONTEXT to pick the correct meaning of ambiguous words. "
-        "Example: Portuguese \"no\" = \"in the\" (contraction of em+o), NOT \"knot/node\". "
-        "Always prefer the grammatical role that fits the sentence over rare/technical meanings.\n\n"
-        "CORRECT example (Portuguese → German):\n"
-        "Source:  Eu  tenho  saudade  de    você\n"
-        "Output:  Ich|habe  |Sehnsucht|von  |dir\n\n"
-        "INCORRECT (this is a natural translation — do NOT do this):\n"
-        "Source:  Eu  tenho  saudade  de  você\n"
-        "Output:  Ich vermisse dich\n\n"
-        "Response format:\n"
-        "Line 1: pipe-separated literal translations, one entry per source word, in source order\n"
-        "Optional: one line starting with NOTES: for idioms or remarks\n"
-        "Output ONLY line 1 (and optional NOTES). Nothing else."
-    )
+# Lines starting with these prefixes are labels emitted by the LLM despite
+# being told not to — we strip them defensively.
+_LABEL_PREFIXES = (
+    "word-by-word:",
+    "word-for-word:",
+    "translation:",
+    "target:",
+    "output:",
+)
+_SOURCE_PREFIXES = ("source:", "source ")
+
+# Pattern for stripping parenthetical asides like "Italo (proper name)".
+_PAREN_RE = re.compile(r"\s*\([^)]*\)\s*")
 
 
-def _birkenbihl_user_prompt(text: str, source_lang: str, target_lang: str, token_count: int) -> str:
-    src = _LANG_NAMES.get(source_lang, source_lang)
-    tgt = _LANG_NAMES.get(target_lang, target_lang)
-    return (
-        f"Translate word-for-word from {src} to {tgt}.\n"
-        f"Source text: {text}\n"
-        f"Source word count: {token_count}\n"
-        f"Required output entries: {token_count} (one per source word, pipe-separated)\n"
-        "REMINDER: Preserve source-word capitalization. Use sentence context for ambiguous words."
-    )
+def _clean_word_translation(raw: str, fallback: str = "") -> str:
+    """Clean a single-word LLM translation.
+
+    Used by translate_word and the per-word fallback. Defensively strips
+    parenthetical asides ("Italo (proper name)" → "Italo"), takes only the
+    first non-empty line, and collapses any remaining whitespace inside the
+    result to a hyphen so it stays a single token.
+    """
+    if not raw:
+        return fallback
+    line = ""
+    for candidate in raw.splitlines():
+        candidate = candidate.strip()
+        if candidate:
+            line = candidate
+            break
+    if not line:
+        return fallback
+    line = _PAREN_RE.sub(" ", line).strip()
+    # Strip surrounding quotes the LLM sometimes adds.
+    line = line.strip("\"'")
+    if " " in line:
+        line = "-".join(line.split())
+    return line or fallback
 
 
-def _birkenbihl_full_system_prompt(source_lang: str, target_lang: str) -> str:
-    """System prompt for full-text two-pass Birkenbihl decoding."""
-    src = _LANG_NAMES.get(source_lang, source_lang)
-    tgt = _LANG_NAMES.get(target_lang, target_lang)
-    return (
-        f"You are a strict word-for-word translator using the Birkenbihl decoding method.\n\n"
-        f"TASK: For each line of the given {src} text, translate every word into {tgt}, "
-        f"one word at a time, preserving the EXACT original word order.\n\n"
-        f"You will also receive a natural {tgt} translation of the text for CONTEXT ONLY — "
-        "use it to disambiguate words, but do NOT copy its phrasing.\n\n"
-        "CRITICAL RULES:\n"
-        "1. Output EXACTLY ONE translation per source word — never merge or split words\n"
-        "2. Translate each word preserving the original word order — do NOT rearrange\n"
-        f"3. The result WILL sound grammatically broken in {tgt} — this is CORRECT\n"
-        "4. Use [ ] only for grammatical particles with no direct equivalent\n"
-        "5. Do NOT use | inside any translation entry\n"
-        "6. Do NOT produce a natural translation — if it sounds fluent, it is WRONG\n"
-        "7. Numbers as digits (e.g. 1, 42) must be copied UNCHANGED\n"
-        "8. PRESERVE the capitalization of the SOURCE word in your translation\n"
-        "9. Use the natural translation to pick the correct meaning of ambiguous words\n\n"
-        "RESPONSE FORMAT:\n"
-        "For EACH non-empty source line, output exactly ONE line of pipe-separated translations.\n"
-        "Empty source lines → output an empty line.\n"
-        "After all lines, optionally add one line starting with NOTES: for remarks.\n"
-        "Output NOTHING else — no line numbers, no labels, no explanations."
-    )
+def _per_word_fallback(
+    tokens: list[str], source_lang: str, target_lang: str, fallback_service,
+) -> list[str]:
+    """Last-resort: translate each token individually via the service."""
+    result: list[str] = []
+    for token in tokens:
+        try:
+            result.append(
+                fallback_service.translate_word(
+                    token, source_lang=source_lang, target_lang=target_lang,
+                )
+            )
+        except Exception as exc:
+            result.append(f"[ERR:{exc}]")
+    return result
 
 
-def _birkenbihl_full_user_prompt(
-    text: str, source_lang: str, target_lang: str,
-    natural_translation: str, line_word_counts: list[int],
-) -> str:
-    """User prompt for full-text two-pass Birkenbihl decoding."""
-    src = _LANG_NAMES.get(source_lang, source_lang)
-    tgt = _LANG_NAMES.get(target_lang, target_lang)
-    counts_str = ", ".join(str(c) for c in line_word_counts)
-    return (
-        f"Translate word-for-word from {src} to {tgt}.\n\n"
-        f"SOURCE TEXT:\n{text}\n\n"
-        f"NATURAL TRANSLATION (for context only — do NOT copy):\n{natural_translation}\n\n"
-        f"Word counts per non-empty line: [{counts_str}]\n"
-        "Each output line must have exactly that many pipe-separated entries.\n"
-        "REMINDER: Preserve source-word capitalization. Use sentence context for ambiguous words."
-    )
+def _extract_word_by_word_lines(raw: str) -> list[str]:
+    """Extract the word-by-word translation lines from the raw LLM output.
+
+    Defensively skips Source: echo lines, strips Word-by-word: prefixes,
+    ignores empty lines / markdown fences, and drops lines that are pure
+    parenthetical commentary (e.g. "(This is a proper name…)").
+    """
+    result: list[str] = []
+    for raw_line in raw.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("```") or line.startswith("---"):
+            continue
+        # Drop lines that are entirely a parenthetical aside.
+        if line.startswith("(") and line.endswith(")"):
+            continue
+        lower = line.lower()
+        if any(lower.startswith(p) for p in _SOURCE_PREFIXES):
+            continue
+        for prefix in _LABEL_PREFIXES:
+            if lower.startswith(prefix):
+                line = line[len(prefix):].strip()
+                break
+        # Strip a leading "[L<n>]" label if the LLM echoed it back.
+        line = re.sub(r"^\[L\d+\]\s*", "", line)
+        # Strip inline parenthetical asides anywhere in the line.
+        line = _PAREN_RE.sub(" ", line).strip()
+        if line:
+            result.append(line)
+    return result
 
 
-def _parse_birkenbihl_full_response(
+def _parse_birkenbihl_text_response(
     raw: str,
     source_lines: list[tuple[int, str]],
     source_lang: str,
     target_lang: str,
     fallback_service,
 ) -> dict:
-    """Parse the full-text Birkenbihl response. Returns dict with line_results and comments."""
-    raw_lines = raw.strip().splitlines()
-    output_lines: list[str] = []
-    notes_lines: list[str] = []
-    in_notes = False
+    """Parse the plain-text Birkenbihl response and produce decoder output."""
+    parsed_lines = _extract_word_by_word_lines(raw)
 
-    for line in raw_lines:
-        stripped = line.strip()
-        if not stripped:
-            output_lines.append("")
-            continue
-        if stripped.upper().startswith("NOTES:"):
-            in_notes = True
-            rest = stripped[6:].strip()
-            if rest:
-                notes_lines.append(rest)
-        elif in_notes:
-            notes_lines.append(stripped)
-        else:
-            output_lines.append(stripped)
-
-    # Match non-empty output lines to non-empty source lines
-    non_empty_outputs = [l for l in output_lines if l.strip()]
     line_results: dict[int, dict] = {}
-    all_comments: list[str] = []
+    comments: list[str] = []
 
     for j, (idx, src_line) in enumerate(source_lines):
-        tokens = src_line.split()
-        expected = len(tokens)
+        src_tokens = src_line.split()
+        expected = len(src_tokens)
 
-        if j < len(non_empty_outputs):
-            words = [w.strip() for w in non_empty_outputs[j].split("|")]
-        else:
-            words = []
-
-        if len(words) != expected:
-            # Fallback: per-word translation for this line
-            fallback_words = []
-            for token in tokens:
-                try:
-                    fallback_words.append(
-                        fallback_service.translate_word(token, source_lang=source_lang, target_lang=target_lang)
-                    )
-                except Exception:
-                    fallback_words.append(f"[?]")
-            all_comments.append(
-                f"[Line {idx + 1}: expected {expected} words, got {len(words)} — per-word fallback]"
+        if j >= len(parsed_lines):
+            comments.append(
+                f"[Line {idx + 1}: LLM omitted this line — per-word fallback]"
             )
-            line_results[idx] = {"words": fallback_words, "comments": ""}
-        else:
-            line_results[idx] = {"words": words, "comments": ""}
+            line_results[idx] = {
+                "words": _per_word_fallback(src_tokens, source_lang, target_lang, fallback_service),
+                "comments": "",
+            }
+            continue
 
-    if notes_lines:
-        all_comments.append("\n".join(notes_lines))
+        target_tokens = parsed_lines[j].split()
 
-    return {"line_results": line_results, "comments": "\n\n".join(all_comments)}
+        if len(target_tokens) != expected:
+            comments.append(
+                f"[Line {idx + 1}: expected {expected} tokens, got {len(target_tokens)} — per-word fallback]"
+            )
+            target_tokens = _per_word_fallback(
+                src_tokens, source_lang, target_lang, fallback_service,
+            )
+
+        line_results[idx] = {"words": target_tokens, "comments": ""}
+
+    return {
+        "line_results": line_results,
+        "comments": "\n".join(comments).strip(),
+        "raw_payload": {"raw_text": raw, "parsed_lines": parsed_lines},
+    }
 
 
-def _parse_birkenbihl_response(
-    raw: str,
-    expected_count: int,
-    tokens: list,
+def _fallback_all_lines(
+    source_lines: list[tuple[int, str]],
     source_lang: str,
     target_lang: str,
     fallback_service,
+    reason: str,
 ) -> dict:
-    """Parse the LLM batch response. Falls back to per-word on mismatch."""
-    lines = raw.strip().splitlines()
-    word_line = ""
-    notes_lines = []
-    in_notes = False
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if stripped.upper().startswith("NOTES:"):
-            in_notes = True
-            rest = stripped[6:].strip()
-            if rest:
-                notes_lines.append(rest)
-        elif in_notes:
-            notes_lines.append(stripped)
-        elif not word_line:
-            word_line = stripped
+    """Catastrophic-failure path: per-word translate every line."""
+    line_results: dict[int, dict] = {}
+    for idx, src_line in source_lines:
+        tokens = src_line.split()
+        line_results[idx] = {
+            "words": _per_word_fallback(tokens, source_lang, target_lang, fallback_service),
+            "comments": "",
+        }
+    return {
+        "line_results": line_results,
+        "comments": f"[Decoder fallback: {reason}]",
+        "raw_payload": {"_error": reason},
+    }
 
-    words = [w.strip() for w in word_line.split("|")] if word_line else []
 
-    if len(words) != expected_count:
-        mismatch_note = (
-            f"[Batch mismatch: expected {expected_count} words, got {len(words)} — fell back to per-word translation]"
-        )
-        fallback_words = []
-        for token in tokens:
-            try:
-                fallback_words.append(
-                    fallback_service.translate_word(token, source_lang=source_lang, target_lang=target_lang)
-                )
-            except Exception as exc:
-                fallback_words.append(f"[ERR:{exc}]")
-        comments = mismatch_note
-        if notes_lines:
-            comments += "\n" + "\n".join(notes_lines)
-        return {"words": fallback_words, "comments": comments}
-
-    return {"words": words, "comments": "\n".join(notes_lines).strip()}
+def _prepare_decode_call(text: str, source_lang: str, target_lang: str):
+    """Split into non-empty source lines + build prompts from config."""
+    raw_lines = text.split("\n")
+    source_lines = [(i, line.strip()) for i, line in enumerate(raw_lines) if line.strip()]
+    if not source_lines:
+        return None
+    cfg = load_prompt_config(source_lang, target_lang)
+    non_empty = [line for _, line in source_lines]
+    system = build_system_prompt(cfg)
+    user = build_user_prompt(cfg, non_empty)
+    return source_lines, system, user
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +254,8 @@ def _parse_birkenbihl_response(
 
 class OpenAIService(LLMService):
     """Translation and generation via OpenAI API."""
+
+    provider = "openai"
 
     def __init__(self, api_key: str, model: str = "gpt-4o-mini"):
         from openai import OpenAI  # lazy import
@@ -298,7 +266,7 @@ class OpenAIService(LLMService):
     def name(self) -> str:
         return "OpenAI"
 
-    def _chat(self, system: str, user: str) -> str:
+    def _chat(self, system: str, user: str, max_tokens: int = 2048) -> str:
         response = self._client.chat.completions.create(
             model=self._model,
             messages=[
@@ -306,6 +274,7 @@ class OpenAIService(LLMService):
                 {"role": "user", "content": user},
             ],
             temperature=0.2,
+            max_tokens=max_tokens,
         )
         return response.choices[0].message.content.strip()
 
@@ -316,25 +285,29 @@ class OpenAIService(LLMService):
         target_lang: str,
         context: Optional[str] = None,
     ) -> str:
+        src = _LANG_NAMES.get(source_lang, source_lang)
+        tgt = _LANG_NAMES.get(target_lang, target_lang)
         system = (
-            f"You are a word-for-word translator following the Birkenbihl method. "
-            f"Translate the given {source_lang} word into {target_lang}.\n\n"
-            "Rules:\n"
-            "- Translate the word literally — preserve meaning, not naturalness\n"
-            "- No natural-sounding output — grammar may sound broken\n"
-            "- Use square brackets [ ] for grammatical helper words with no direct equivalent\n"
-            "- Use (note: ...) for idioms that make no literal sense\n"
-            "- Every source word must appear in the target — omit nothing\n"
-            "- Return ONLY the translated word or short phrase — no explanation, no punctuation"
+            f"You are a strict word-for-word translator. Translate the given "
+            f"{src} word into {tgt}.\n\n"
+            "RULES (each mandatory):\n"
+            "- Return EXACTLY ONE token: a single word, or multiple words joined with '-'.\n"
+            "- If the word is a proper name (person, place, brand), return it UNCHANGED.\n"
+            "- If there is no direct equivalent, return '[]'.\n"
+            "- NO parentheses, NO explanations, NO 'or X' alternatives, NO commentary, NO quotes.\n"
+            "- NO spaces inside the output."
         )
         user = f"Word: {word}"
         if context:
             user += f"\nContext: {context}"
-        return self._chat(system, user)
+        raw = self._chat(system, user, max_tokens=64)
+        return _clean_word_translation(raw, fallback=word)
 
     def translate_text(self, text: str, source_lang: str, target_lang: str) -> str:
+        src = _LANG_NAMES.get(source_lang, source_lang)
+        tgt = _LANG_NAMES.get(target_lang, target_lang)
         system = (
-            f"You are a professional translator. Translate the following text from {source_lang} to {target_lang}. "
+            f"You are a professional translator. Translate the following text from {src} to {tgt}. "
             "Provide a natural, fluent translation. Return ONLY the translation."
         )
         return self._chat(system, text)
@@ -348,11 +321,13 @@ class OpenAIService(LLMService):
         return self._chat(system, prompt)
 
     def word_lookup(self, word: str, source_lang: str, target_lang: str) -> dict:
+        src = _LANG_NAMES.get(source_lang, source_lang)
+        tgt = _LANG_NAMES.get(target_lang, target_lang)
         system = (
-            f"You are a bilingual dictionary. For the given {source_lang} word, provide:\n"
-            "1. Best translation to " + target_lang + "\n"
+            f"You are a bilingual dictionary. For the given {src} word, provide:\n"
+            f"1. Best translation to {tgt}\n"
             "2. Word class (noun/verb/adjective/adverb/other)\n"
-            "3. One short example sentence in " + source_lang + "\n"
+            f"3. One short example sentence in {src}\n"
             "Respond in this exact format:\n"
             "translation: <word>\nword_class: <class>\nexample: <sentence>"
         )
@@ -367,29 +342,25 @@ class OpenAIService(LLMService):
                 result["example_sentence"] = line.split(":", 1)[1].strip()
         return result
 
-    def translate_birkenbihl(self, text: str, source_lang: str, target_lang: str) -> dict:
-        tokens = text.split()
-        if not tokens:
-            return {"words": [], "comments": ""}
-        system = _birkenbihl_system_prompt(source_lang, target_lang)
-        user = _birkenbihl_user_prompt(text, source_lang, target_lang, len(tokens))
-        raw = self._chat(system, user)
-        return _parse_birkenbihl_response(raw, len(tokens), tokens, source_lang, target_lang, self)
-
     def translate_birkenbihl_full(
-        self, text: str, source_lang: str, target_lang: str, natural_translation: str,
+        self, text: str, source_lang: str, target_lang: str,
     ) -> dict:
-        raw_lines = text.split("\n")
-        source_lines = [(i, line.strip()) for i, line in enumerate(raw_lines) if line.strip()]
-        if not source_lines:
-            return {"line_results": {}, "comments": ""}
-        line_word_counts = [len(line.split()) for _, line in source_lines]
-        system = _birkenbihl_full_system_prompt(source_lang, target_lang)
-        user = _birkenbihl_full_user_prompt(
-            text, source_lang, target_lang, natural_translation, line_word_counts,
+        prep = _prepare_decode_call(text, source_lang, target_lang)
+        if prep is None:
+            return {"line_results": {}, "comments": "", "raw_payload": None}
+        source_lines, system, user = prep
+
+        try:
+            raw = self._chat(system, user, max_tokens=4096)
+        except Exception as exc:
+            return _fallback_all_lines(
+                source_lines, source_lang, target_lang, self,
+                reason=f"OpenAI call failed: {exc}",
+            )
+
+        return _parse_birkenbihl_text_response(
+            raw, source_lines, source_lang, target_lang, self,
         )
-        raw = self._chat(system, user)
-        return _parse_birkenbihl_full_response(raw, source_lines, source_lang, target_lang, self)
 
 
 # ---------------------------------------------------------------------------
@@ -398,6 +369,8 @@ class OpenAIService(LLMService):
 
 class ClaudeService(LLMService):
     """Translation and generation via Anthropic Claude API."""
+
+    provider = "anthropic"
 
     def __init__(self, api_key: str, model: str = "claude-haiku-4-5-20251001"):
         import anthropic  # lazy import
@@ -424,25 +397,29 @@ class ClaudeService(LLMService):
         target_lang: str,
         context: Optional[str] = None,
     ) -> str:
+        src = _LANG_NAMES.get(source_lang, source_lang)
+        tgt = _LANG_NAMES.get(target_lang, target_lang)
         system = (
-            f"You are a word-for-word translator following the Birkenbihl method. "
-            f"Translate the given {source_lang} word into {target_lang}.\n\n"
-            "Rules:\n"
-            "- Translate the word literally — preserve meaning, not naturalness\n"
-            "- No natural-sounding output — grammar may sound broken\n"
-            "- Use square brackets [ ] for grammatical helper words with no direct equivalent\n"
-            "- Use (note: ...) for idioms that make no literal sense\n"
-            "- Every source word must appear in the target — omit nothing\n"
-            "- Return ONLY the translated word or short phrase — no explanation, no punctuation"
+            f"You are a strict word-for-word translator. Translate the given "
+            f"{src} word into {tgt}.\n\n"
+            "RULES (each mandatory):\n"
+            "- Return EXACTLY ONE token: a single word, or multiple words joined with '-'.\n"
+            "- If the word is a proper name (person, place, brand), return it UNCHANGED.\n"
+            "- If there is no direct equivalent, return '[]'.\n"
+            "- NO parentheses, NO explanations, NO 'or X' alternatives, NO commentary, NO quotes.\n"
+            "- NO spaces inside the output."
         )
         user = f"Word: {word}"
         if context:
             user += f"\nContext: {context}"
-        return self._message(system, user)
+        raw = self._message(system, user, max_tokens=64)
+        return _clean_word_translation(raw, fallback=word)
 
     def translate_text(self, text: str, source_lang: str, target_lang: str) -> str:
+        src = _LANG_NAMES.get(source_lang, source_lang)
+        tgt = _LANG_NAMES.get(target_lang, target_lang)
         system = (
-            f"You are a professional translator. Translate the following text from {source_lang} to {target_lang}. "
+            f"You are a professional translator. Translate the following text from {src} to {tgt}. "
             "Provide a natural, fluent translation. Return ONLY the translation."
         )
         return self._message(system, text)
@@ -456,11 +433,13 @@ class ClaudeService(LLMService):
         return self._message(system, prompt)
 
     def word_lookup(self, word: str, source_lang: str, target_lang: str) -> dict:
+        src = _LANG_NAMES.get(source_lang, source_lang)
+        tgt = _LANG_NAMES.get(target_lang, target_lang)
         system = (
-            f"You are a bilingual dictionary. For the given {source_lang} word, provide:\n"
-            "1. Best translation to " + target_lang + "\n"
+            f"You are a bilingual dictionary. For the given {src} word, provide:\n"
+            f"1. Best translation to {tgt}\n"
             "2. Word class (noun/verb/adjective/adverb/other)\n"
-            "3. One short example sentence in " + source_lang + "\n"
+            f"3. One short example sentence in {src}\n"
             "Respond in this exact format:\n"
             "translation: <word>\nword_class: <class>\nexample: <sentence>"
         )
@@ -475,29 +454,25 @@ class ClaudeService(LLMService):
                 result["example_sentence"] = line.split(":", 1)[1].strip()
         return result
 
-    def translate_birkenbihl(self, text: str, source_lang: str, target_lang: str) -> dict:
-        tokens = text.split()
-        if not tokens:
-            return {"words": [], "comments": ""}
-        system = _birkenbihl_system_prompt(source_lang, target_lang)
-        user = _birkenbihl_user_prompt(text, source_lang, target_lang, len(tokens))
-        raw = self._message(system, user)
-        return _parse_birkenbihl_response(raw, len(tokens), tokens, source_lang, target_lang, self)
-
     def translate_birkenbihl_full(
-        self, text: str, source_lang: str, target_lang: str, natural_translation: str,
+        self, text: str, source_lang: str, target_lang: str,
     ) -> dict:
-        raw_lines = text.split("\n")
-        source_lines = [(i, line.strip()) for i, line in enumerate(raw_lines) if line.strip()]
-        if not source_lines:
-            return {"line_results": {}, "comments": ""}
-        line_word_counts = [len(line.split()) for _, line in source_lines]
-        system = _birkenbihl_full_system_prompt(source_lang, target_lang)
-        user = _birkenbihl_full_user_prompt(
-            text, source_lang, target_lang, natural_translation, line_word_counts,
+        prep = _prepare_decode_call(text, source_lang, target_lang)
+        if prep is None:
+            return {"line_results": {}, "comments": "", "raw_payload": None}
+        source_lines, system, user = prep
+
+        try:
+            raw = self._message(system, user, max_tokens=4096)
+        except Exception as exc:
+            return _fallback_all_lines(
+                source_lines, source_lang, target_lang, self,
+                reason=f"Claude call failed: {exc}",
+            )
+
+        return _parse_birkenbihl_text_response(
+            raw, source_lines, source_lang, target_lang, self,
         )
-        raw = self._message(system, user, max_tokens=4096)
-        return _parse_birkenbihl_full_response(raw, source_lines, source_lang, target_lang, self)
 
 
 def build_llm_service(provider: str, api_key: str) -> LLMService:

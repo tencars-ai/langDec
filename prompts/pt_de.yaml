@@ -1,0 +1,75 @@
+source_lang_name: Portuguese
+target_lang_name: German
+
+rules: |
+  PORTUGUESE-SPECIFIC RULES:
+
+  Contractions (preposition + article) are SINGLE source tokens. Render with
+  hyphen into ONE target entry:
+    do/dos     → von-dem / von-den
+    da/das     → von-der / von-den
+    no/nos     → in-dem / in-den
+    na/nas     → in-der / in-den
+    à/às       → zu-die / zu-die
+    ao/aos     → zu-dem / zu-den
+    pelo/pela  → durch-den / durch-die
+    neste/nesta → in-diesem / in-dieser
+
+  Periphrastic future (ir + infinitive): each source word stays a SEPARATE
+  entry. The auxiliary keeps person via hyphen.
+    vou comer    → werde-ich essen
+    vamos chegar → werden-wir ankommen
+    vai chegar   → wird-er ankommen
+
+  Verbs with explicit subject pronoun (eu, tu, ele, nós, vocês): translate
+  the pronoun separately. Do NOT repeat the person in the verb.
+    eu tenho    → ich habe
+    eu entendo  → ich verstehe
+    nós vamos chegar → wir werden-wir ankommen
+
+  Preposition "a" before infinitive (European Portuguese progressive or
+  pre-infinitive marker): the "a" has no German equivalent — use "[]".
+    está a fazer        → ist [] machen
+    a impressionar      → [] beeindrucken
+    a considerarem      → [] betrachten
+    aparece a surfar    → erscheint [] surfen
+
+  Comparative "do que" (e.g. "mais X do que Y"): "do" maps literally to
+  "von-dem", "que" has no direct German equivalent → "[]".
+    muito mais X do que Y → viel mehr X von-dem [] Y
+
+# Reference outputs the LLM should emulate.
+examples:
+  - source: "Eu tenho saudade de você."
+    target: "Ich habe Sehnsucht von dir."
+
+  - source: "Ela está com fome agora."
+    target: "Sie ist mit Hunger jetzt."
+
+  - source: "Nós vamos chegar tarde hoje à noite."
+    target: "Wir werden-wir ankommen spät heute zu-die Nacht."
+
+  - source: "O menino que eu vi ontem é o filho do meu vizinho."
+    target: "Der Junge den ich sah gestern ist der Sohn von-dem mein Nachbar."
+
+  - source: "Quanto mais eu estudo, menos eu entendo."
+    target: "Wieviel mehr ich studiere, weniger ich verstehe."
+
+# Known ambiguities — repeated in user prompt for prominence.
+disambiguation:
+  - "está (3sg estar) → 'ist' — NEVER 'Das'"
+  - "é (3sg ser) → 'ist' — NEVER 'Und'"
+  - "mais → 'mehr' — NEVER 'aber' or 'als'"
+  - "Quanto (in 'Quanto mais X, menos Y') → 'Wieviel' — NEVER 'Als'"
+  - "agora → 'jetzt' (lowercase)"
+  - "tarde (in 'chegar tarde' / 'tarde da noite') → 'spät' — NEVER 'Nachmittag'"
+  - "vi (1sg pretérito of ver) → 'sah'"
+  - "que (relative pronoun with human antecedent) → 'der/die/den' by case — NEVER 'was' for persons"
+  - "saudade → 'Sehnsucht' (single word, no suffix)"
+  - "você (informal) → 'du' (lowercase) — 'Sie' only when context is clearly formal"
+
+critical_reminders:
+  - "EXACTLY one target entry per source word — count source words and target tokens before answering."
+  - "Use '-' only for ONE source word → multiple target words (e.g. 'vamos → werden-wir', 'à → zu-die')."
+  - "Use '[]' (empty brackets) when a source word has no direct German equivalent (e.g. 'a fazer → [] machen', 'do que → von-dem [])."
+  - "NEVER merge two source words into one hyphenated entry ('ter mostrado → haben-gezeigt' is FORBIDDEN)."

@@ -42,9 +42,9 @@ with col_a:
 with col_b:
     with st.expander("➕ Add text manually", expanded=False):
         folders_for_add = db.execute(
-            "SELECT id, name FROM folders WHERE user_id = %s ORDER BY name", (user_id,)
+            "SELECT folder_id, name FROM folders WHERE user_id = %s ORDER BY name", (user_id,)
         )
-        folder_options_add = {"(No folder)": None, **{f["name"]: str(f["id"]) for f in folders_for_add}}
+        folder_options_add = {"(No folder)": None, **{f["name"]: str(f["folder_id"]) for f in folders_for_add}}
         title_add = st.text_input("Title", key="add_text_title")
         content_add = st.text_area("Content", height=120, key="add_text_content")
         lang_label_add = st.selectbox("Language", list(LANGUAGES.keys()), key="add_text_lang")
@@ -71,10 +71,10 @@ all_folders = db.execute(
 # --- Load all texts with folder info ---
 texts = db.execute(
     """
-    SELECT t.id, t.title, t.source_language, t.created_at, t.folder_id,
+    SELECT t.text_id, t.title, t.source_language, t.created_at, t.folder_id,
            f.name AS folder_name
     FROM texts t
-    LEFT JOIN folders f ON f.id = t.folder_id
+    LEFT JOIN folders f ON f.folder_id = t.folder_id
     WHERE t.user_id = %s
     ORDER BY COALESCE(f.name, '') ASC, t.created_at DESC
     """,
@@ -130,8 +130,8 @@ else:
                         expanded=False,
                     ):
                         full = db.execute_one(
-                            "SELECT content, decoded_text, translated_text, notes FROM texts WHERE id = %s",
-                            (str(text["id"]),),
+                            "SELECT content, decoded_text, translated_text, notes FROM texts WHERE text_id = %s",
+                            (str(text["text_id"]),),
                         )
                         content_val = (full["content"] or "") if full else ""
                         decoded_val = (full["decoded_text"] or "") if full else ""
@@ -150,49 +150,49 @@ else:
                         idx = 0
                         with tabs[idx]:
                             st.text_area("Content", value=content_val, height=150,
-                                         key=f"content_{text['id']}", disabled=True)
+                                         key=f"content_{text['text_id']}", disabled=True)
                         if decoded_val:
                             idx += 1
                             with tabs[idx]:
                                 st.text_area("Decoded", value=decoded_val, height=150,
-                                             key=f"decoded_{text['id']}", disabled=True)
+                                             key=f"decoded_{text['text_id']}", disabled=True)
                         if translated_val:
                             idx += 1
                             with tabs[idx]:
                                 st.text_area("Translation", value=translated_val, height=150,
-                                             key=f"translated_{text['id']}", disabled=True)
+                                             key=f"translated_{text['text_id']}", disabled=True)
                         if notes_val:
                             idx += 1
                             with tabs[idx]:
                                 st.info(notes_val)
 
                         # Audio playback
-                        audio_data = audio_svc.get_by_text_id(str(text["id"]), user_id)
+                        audio_data = audio_svc.get_by_text_id(str(text["text_id"]), user_id)
                         if audio_data:
                             st.audio(audio_data, format="audio/mp3")
 
                         col1, col2 = st.columns(2)
                         with col1:
-                            if st.button("Load into Decode Text", key=f"load_{text['id']}", type="primary"):
+                            if st.button("Load into Decode Text", key=f"load_{text['text_id']}", type="primary"):
                                 st.session_state.input_text = content_val
                                 st.switch_page("pages/0_Start.py")
                         with col2:
-                            if st.session_state.get(f"confirm_del_text_{text['id']}"):
+                            if st.session_state.get(f"confirm_del_text_{text['text_id']}"):
                                 st.warning("Are you sure?")
                                 c1, c2 = st.columns(2)
                                 with c1:
-                                    if st.button("Yes, delete", key=f"del_confirm_{text['id']}", type="primary"):
+                                    if st.button("Yes, delete", key=f"del_confirm_{text['text_id']}", type="primary"):
                                         db.execute_write(
-                                            "DELETE FROM texts WHERE id = %s AND user_id = %s",
-                                            (str(text["id"]), user_id),
+                                            "DELETE FROM texts WHERE text_id = %s AND user_id = %s",
+                                            (str(text["text_id"]), user_id),
                                         )
-                                        st.session_state.pop(f"confirm_del_text_{text['id']}", None)
+                                        st.session_state.pop(f"confirm_del_text_{text['text_id']}", None)
                                         st.rerun()
                                 with c2:
-                                    if st.button("Cancel", key=f"del_cancel_{text['id']}"):
-                                        st.session_state.pop(f"confirm_del_text_{text['id']}", None)
+                                    if st.button("Cancel", key=f"del_cancel_{text['text_id']}"):
+                                        st.session_state.pop(f"confirm_del_text_{text['text_id']}", None)
                                         st.rerun()
                             else:
-                                if st.button("Delete", key=f"del_{text['id']}"):
-                                    st.session_state[f"confirm_del_text_{text['id']}"] = True
+                                if st.button("Delete", key=f"del_{text['text_id']}"):
+                                    st.session_state[f"confirm_del_text_{text['text_id']}"] = True
                                     st.rerun()

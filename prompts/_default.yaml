@@ -1,0 +1,42 @@
+# Universal rules — apply to every language pair.
+# Pair-specific YAML files add their own rules on top.
+
+universal_rules: |
+  TASK: Translate every source word into the target language, preserving the
+  EXACT original word order. The result MUST sound grammatically broken in
+  the target language — this is intentional for Birkenbihl-style decoding.
+
+  STRICT RULES:
+  1. The output must have EXACTLY the same number of entries (whitespace-
+     separated tokens) as the source has words. Each source word gets exactly
+     ONE target entry.
+  2. If a source word needs MULTIPLE target words to convey its meaning, join
+     them with "-" into ONE entry — examples:
+       "vamos" → "werden-wir"     (verb + person)
+       "à"     → "zu-die"          (preposition + article contraction)
+       "do"    → "von-dem"         (preposition + article contraction)
+  3. If a source word has NO direct target equivalent (linking particles,
+     idiom fillers, infinitive markers), use "[]" (empty square brackets) as
+     its target entry. Examples:
+       "a fazer"      → "[] machen"          (Portuguese "a" before infinitive)
+       "do que"       → "von-dem []"         (Portuguese comparative marker)
+  4. NEVER merge two source words into one entry with "-". The hyphen rule
+     (#2) is ONLY for one source word producing multiple target words —
+     never the reverse. Example of WRONG behavior:
+       "ter mostrado" → "haben-gezeigt"   ← WRONG (two source words merged)
+       Correct: "ter mostrado" → "haben gezeigt" (two separate entries)
+  5. Preserve the original source word order. No rearranging to fit target
+     grammar.
+  6. If the output sounds fluent and natural in the target language, it is
+     WRONG. Birkenbihl is intentionally literal.
+  7. Preserve the source word's capitalization in the target. EXCEPTION:
+     German nouns may keep their canonical capitalization.
+
+anti_patterns:
+  - 'Merging two source words into one hyphenated target ("ter mostrado" → "haben-gezeigt") — STRICTLY FORBIDDEN.'
+  - "Outputting fewer target entries than source words."
+  - "Outputting more target entries than source words."
+  - "Natural rephrasing instead of literal token-by-token translation."
+  - "Markdown formatting, code fences, headers, prose, or any text around the translation."
+  - 'Using square brackets with content ("[werden]", "[note: ...]") — only EMPTY "[]" is allowed.'
+  - 'Multiple alternatives separated by "/" or "or" — pick ONE.'

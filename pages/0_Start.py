@@ -40,7 +40,7 @@ with col_right:
 source_language = LANGUAGES[source_label]
 target_language = LANGUAGES[target_label]
 
-for key in ("input_text", "start_output", "start_decoded", "start_translated", "start_comments"):
+for key in ("input_text", "start_output", "start_decoded", "start_translated", "start_comments", "start_debug"):
     if key not in st.session_state:
         st.session_state[key] = ""
 if "start_audio" not in st.session_state:
@@ -49,7 +49,10 @@ for key in ("show_camera", "show_browse"):
     if key not in st.session_state:
         st.session_state[key] = False
 
-_decoder = WordByWordDecoder(get_decode_service())
+_decoder = WordByWordDecoder(
+    get_decode_service(),
+    debug=st.session_state.get("debug_mode", False),
+)
 _translator = Translator(get_translate_service())
 _tts = GTTSService()
 ocr_line_height_threshold = get_ocr_threshold()
@@ -169,15 +172,23 @@ if decode_translate_clicked:
         with st.status("Processing…", expanded=True) as _status:
             _stripped = input_text.strip()
 
-            # Step 1: Translation + Audio in parallel
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as _executor:
+            # Translate, Audio, and Decode all run in parallel — they no longer
+            # depend on each other (the decoder no longer consumes the natural
+            # translation as context).
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as _executor:
                 _future_translate = _executor.submit(
                     _translator.translate, _stripped, source_language, target_language,
                 )
                 _future_audio = _executor.submit(
                     _tts.synthesize, _stripped, source_language,
                 )
-                for _future in concurrent.futures.as_completed([_future_translate, _future_audio]):
+                _future_decode = _executor.submit(
+                    _decoder.decode,
+                    _stripped, source_language, target_language, max_line_length,
+                )
+
+                _futures = [_future_translate, _future_audio, _future_decode]
+                for _future in concurrent.futures.as_completed(_futures):
                     if _future is _future_translate:
                         try:
                             _t = _future.result()
@@ -189,36 +200,51 @@ if decode_translate_clicked:
                         except Exception as _e:
                             st.write(f"❌ Translation error: {_e}")
                             st.session_state.start_translated = ""
-                    else:
+
+                    elif _future is _future_audio:
                         try:
-                            _audio = _future.result()
-                            st.session_state.start_audio = _audio
+                            st.session_state.start_audio = _future.result()
                             st.write("✅ Audio ready")
-                            # Audio renders together with the Decoding section once decoding finishes.
+                            # If decode already finished, render audio in its own slot so we
+                            # don't re-render the decoded section (which would reuse its key).
+                            if st.session_state.start_decoded:
+                                with _decoded_slot.container():
+                                    st.markdown("#### 🔤 Decoding (word-by-word)")
+                                    st.audio(st.session_state.start_audio, format="audio/mp3")
+                                    st.text_area(
+                                        "Decoded",
+                                        value=st.session_state.start_decoded,
+                                        height=200,
+                                        key="decoded_live_with_audio",
+                                        label_visibility="collapsed",
+                                    )
                         except Exception as _e:
                             st.write(f"❌ Audio error: {_e}")
                             st.session_state.start_audio = None
 
-            # Step 2: Decode using translation as context (single LLM call)
-            try:
-                _r = _decoder.decode(
-                    _stripped, source_language, target_language, max_line_length,
-                    natural_translation=st.session_state.start_translated,
-                )
-                st.session_state.start_decoded = _r.aligned_text
-                st.session_state.start_comments = _r.comments
-                st.write("✅ Decoding done")
-                _render_decoded_section(
-                    _decoded_slot, _r.aligned_text, st.session_state.start_audio, key="decoded_live",
-                )
-                if _r.comments:
-                    with _notes_slot.container():
-                        st.markdown("#### 📝 Hints")
-                        st.info(_r.comments)
-            except Exception as _e:
-                st.write(f"❌ Decoding error: {_e}")
-                st.session_state.start_decoded = ""
-                st.session_state.start_comments = ""
+                    else:  # decode
+                        try:
+                            _r = _future.result()
+                            st.session_state.start_decoded = _r.aligned_text
+                            st.session_state.start_comments = _r.comments
+                            st.session_state.start_debug = _r.debug_info
+                            st.write("✅ Decoding done")
+                            _render_decoded_section(
+                                _decoded_slot, _r.aligned_text,
+                                st.session_state.start_audio, key="decoded_live",
+                            )
+                            if _r.comments:
+                                with _notes_slot.container():
+                                    st.markdown("#### 📝 Hints")
+                                    st.info(_r.comments)
+                            if _r.debug_info:
+                                with st.expander("🔍 Debug: raw LLM response", expanded=False):
+                                    st.code(_r.debug_info, language="json")
+                        except Exception as _e:
+                            st.write(f"❌ Decoding error: {_e}")
+                            st.session_state.start_decoded = ""
+                            st.session_state.start_comments = ""
+                            st.session_state.start_debug = ""
 
             _status.update(label="Done!", state="complete")
 
@@ -229,23 +255,26 @@ if decode_translate_clicked:
                if st.session_state.start_comments else "")
         )
 
-# --- Populate output slots (after click or on re-renders from session state) ---
-if st.session_state.start_translated:
-    with _translated_slot.container():
-        st.markdown("#### 🌐 Translation (natural)")
-        st.markdown(st.session_state.start_translated)
+# --- Populate output slots on page re-renders (NOT during the click pass,
+# where the live renders inside the click block have already filled them
+# with key="decoded_live" / "decoded_live_with_audio") ---
+if not decode_translate_clicked:
+    if st.session_state.start_translated:
+        with _translated_slot.container():
+            st.markdown("#### 🌐 Translation (natural)")
+            st.markdown(st.session_state.start_translated)
 
-_render_decoded_section(
-    _decoded_slot,
-    st.session_state.start_decoded,
-    st.session_state.start_audio,
-    key="decoded_state",
-)
+    _render_decoded_section(
+        _decoded_slot,
+        st.session_state.start_decoded,
+        st.session_state.start_audio,
+        key="decoded_state",
+    )
 
-if st.session_state.start_comments:
-    with _notes_slot.container():
-        st.markdown("#### 📝 Notes")
-        st.info(st.session_state.start_comments)
+    if st.session_state.start_comments:
+        with _notes_slot.container():
+            st.markdown("#### 📝 Notes")
+            st.info(st.session_state.start_comments)
 
 # --- Save to text library ---
 if st.session_state.start_output:

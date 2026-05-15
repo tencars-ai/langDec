@@ -92,6 +92,53 @@
 - [x] settings und help bleiben-
  
 
+ ## deployment auf prod:
+ Damit das morgen glatt läuft, hier eine Pre-Deployment-Checklist — ich gehe das gerne mit dir vorher durch, jetzt nur als Vorschau,
+  was wir prüfen sollten:
+
+  1. Code & Git
+
+  - Auf welchem Branch sind wir gerade? (mvp-01 laut Git-Status zu Beginn) — soll der direkt auf main gemergt werden oder via PR?
+  - Viele geänderte Files aus dem Refactor — wir sollten die in sinnvolle Commits gruppieren statt einen Riesen-Commit zu machen (z. B.
+   "Refactor decoder to plain-text format", "Add prompt config system", "Add debug mode", "Fix logout").
+  - .streamlit/secrets.toml ist in .gitignore ✅ (aus MEMORY.md schon bekannt)
+  - Temp-Dateien im Repo (utils/*.tmp.*) — die sollten weg.
+
+  2. Datenbank
+
+  - Migration sql/005_pk_rename_and_consistency.sql auf der Prod-DB ausführen — das hatten wir frühere in dieser Session schon mal
+  bemerkt (User hatte den column "id" Fehler). Wenn Prod schon migriert ist, OK; wenn nicht, vorher migrieren.
+  - Prod-Connection-String für Neon (separater von dev?).
+
+  3. Streamlit Cloud
+
+  - App-Setup auf share.streamlit.io oder cloud.streamlit.io
+  - Secrets in der Cloud-UI eintragen (nicht im Repo):
+    - DATABASE_URL = Prod-Neon-String
+    - SECRET_KEY = ≥32-Zeichen-Fernet-Key (muss derselbe sein wie zuvor, sonst können bestehende verschlüsselte API-Keys nicht mehr
+  decryptet werden!)
+  - Python-Version in requirements.txt ggf. ergänzen (Streamlit Cloud nimmt sonst Default).
+  - requirements.txt ist aktuell — PyYAML ist drin ✅.
+
+  4. Lokaler Smoke-Test vor Commit
+
+  - App lokal starten → Login → Decode mit pt-Sätzen → check Output (das, was wir gerade fertig haben)
+  - Logout testen (sollte mit dem st.rerun()-Fix laufen)
+  - Settings testen (Debug-Toggle, API-Key-Save)
+
+  Vorschlag für die Reihenfolge morgen
+
+  1. Vorher (jetzt/abends): App lokal nochmal komplett durchklicken.
+  2. Morgen:
+    - Commits gruppieren (ich kann dir die Diffs auflisten und vorschlagen, welche Files in welchen Commit).
+    - Migrations-Schritt auf Prod-DB explizit ausführen (oder verifizieren, dass schon gemacht).
+    - Streamlit Cloud Secrets setzen.
+    - Push auf main (oder PR-merge je nach Branch-Strategie).
+    - App-Deployment auf Cloud, dann End-to-End-Test in der Cloud.
+
+  Soll ich dir morgen früh helfen, die Commits sinnvoll zu gruppieren? Dann gibst du mir nur das "Go", und ich liste dir die Files pro
+  Commit auf, du verifizierst, und dann committen wir nacheinander.
+
 ## Branch: Decoding Bugs
 -[ ] Großschreibung von "Und" und "In" mittem im Satz, "No" wird häufig als "Knoten" übersetzt, dabei ist es eine präposition 
 -[ ] sollte schon erledigt sein. Aber bitte vom Architekten Agent nochmal überprüfen lassen. Decoding ist noch recht langsam: decoder algorithmus ggf. anpassen, dass zunächst der Ganze Text im Konext übersetzt wird und dann die einzelnen wörter 1:1 übersetzt zugeordnet werden. 
@@ -110,6 +157,9 @@
 - [ ] erneute Decode Generierung zeigt dann den Text nicht mehr an
 - [ ] Sonderzeichen ç werden nicht immer vom originaltext zum decoded text übernommen
 - [ ] vor dem login ist das ganze Menü zu sehen, welches es dann später gar nicht mehr gibt. Ist das doppelt definiert. kann dort nicht einfach das gleiche oder gar kein menu angezeigt werden?
+- [ ] die preferences gehen verloren
+- [ ] braucht es den word für word fallback im decoder, ich will den eigentlich loswerden
+
 
 
 ## MVP-02 Phase

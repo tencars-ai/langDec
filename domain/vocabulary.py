@@ -2,8 +2,8 @@
 VocabularyManager – CRUD for user_dictionary with deduplication and frequency tracking.
 
 Card fields (6):
-  word_source          – foreign language word/phrase
-  word_target          – mother tongue: natural translation
+  source_word          – foreign language word/phrase
+  target_word          – mother tongue: natural translation
   word_target_decoded  – mother tongue: literal/decoded translation (Birkenbihl)
   word_class           – noun, verb, adj, adv, phrase, ...
   example_sentence     – example sentence in source language
@@ -24,10 +24,10 @@ class VocabularyManager:
     def add_word(
         self,
         user_id: str,
-        word_source: str,
-        word_target: str,
-        lang_source: str,
-        lang_target: str,
+        source_word: str,
+        target_word: str,
+        source_language: str,
+        target_language: str,
         word_class: Optional[str] = None,
         word_target_decoded: Optional[str] = None,
         example_sentence: Optional[str] = None,
@@ -41,76 +41,77 @@ class VocabularyManager:
         self._db.execute_write(
             """
             INSERT INTO user_dictionary
-                (user_id, word_source, word_target, lang_source, lang_target,
+                (user_id, source_word, target_word, source_language, target_language,
                  word_class, word_target_decoded, example_sentence, explanation, source_text_id)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (user_id, word_source, lang_source, lang_target) DO UPDATE
+            ON CONFLICT (user_id, source_word, source_language, target_language) DO UPDATE
                 SET frequency = user_dictionary.frequency + 1,
-                    word_target = EXCLUDED.word_target,
+                    target_word = EXCLUDED.target_word,
                     word_class = COALESCE(EXCLUDED.word_class, user_dictionary.word_class),
                     word_target_decoded = COALESCE(EXCLUDED.word_target_decoded, user_dictionary.word_target_decoded),
                     example_sentence = COALESCE(EXCLUDED.example_sentence, user_dictionary.example_sentence),
                     explanation = COALESCE(EXCLUDED.explanation, user_dictionary.explanation)
             """,
             (
-                user_id, word_source, word_target, lang_source, lang_target,
+                user_id, source_word, target_word, source_language, target_language,
                 word_class, word_target_decoded, example_sentence, explanation, source_text_id,
             ),
         )
         entry = self._db.execute_one(
             """
-            SELECT id FROM user_dictionary
-            WHERE user_id = %s AND word_source = %s
-              AND lang_source = %s AND lang_target = %s
+            SELECT user_dictionary_id FROM user_dictionary
+            WHERE user_id = %s AND source_word = %s
+              AND source_language = %s AND target_language = %s
             """,
-            (user_id, word_source, lang_source, lang_target),
+            (user_id, source_word, source_language, target_language),
         )
         if entry:
             self._db.execute_write(
                 """
-                INSERT INTO vocab_cards (user_id, dictionary_entry_id)
+                INSERT INTO vocab_cards (user_id, user_dictionary_id)
                 VALUES (%s, %s)
-                ON CONFLICT (user_id, dictionary_entry_id) DO NOTHING
+                ON CONFLICT (user_id, user_dictionary_id) DO NOTHING
                 """,
-                (user_id, str(entry["id"])),
+                (user_id, str(entry["user_dictionary_id"])),
             )
 
     def get_words(
         self,
         user_id: str,
-        lang_source: Optional[str] = None,
-        lang_target: Optional[str] = None,
+        source_language: Optional[str] = None,
+        target_language: Optional[str] = None,
         search: Optional[str] = None,
     ) -> list[dict]:
         """Return dictionary entries for a user, with optional filters."""
         conditions = ["user_id = %s"]
         params: list = [user_id]
 
-        if lang_source:
-            conditions.append("lang_source = %s")
-            params.append(lang_source)
-        if lang_target:
-            conditions.append("lang_target = %s")
-            params.append(lang_target)
+        if source_language:
+            conditions.append("source_language = %s")
+            params.append(source_language)
+        if target_language:
+            conditions.append("target_language = %s")
+            params.append(target_language)
         if search:
-            conditions.append("(word_source ILIKE %s OR word_target ILIKE %s OR word_target_decoded ILIKE %s)")
+            conditions.append("(source_word ILIKE %s OR target_word ILIKE %s OR word_target_decoded ILIKE %s)")
             params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
 
         where = " AND ".join(conditions)
         return self._db.execute(
             f"""
-            SELECT id, word_source, word_target, word_target_decoded, lang_source, lang_target,
-                   word_class, example_sentence, explanation, frequency, first_seen
+            SELECT user_dictionary_id, source_word, target_word, word_target_decoded,
+                   source_language, target_language,
+                   word_class, example_sentence, explanation, frequency, created_at
             FROM user_dictionary
             WHERE {where}
-            ORDER BY frequency DESC, word_source
+            ORDER BY frequency DESC, source_word
             """,
             tuple(params),
         )
 
     def get_word(self, user_id: str, word_id: str) -> Optional[dict]:
         return self._db.execute_one(
-            "SELECT * FROM user_dictionary WHERE id = %s AND user_id = %s",
+            "SELECT * FROM user_dictionary WHERE user_dictionary_id = %s AND user_id = %s",
             (word_id, user_id),
         )
 
@@ -118,7 +119,7 @@ class VocabularyManager:
         self,
         user_id: str,
         word_id: str,
-        word_target: Optional[str] = None,
+        target_word: Optional[str] = None,
         word_target_decoded: Optional[str] = None,
         word_class: Optional[str] = None,
         example_sentence: Optional[str] = None,
@@ -128,18 +129,18 @@ class VocabularyManager:
         self._db.execute_write(
             """
             UPDATE user_dictionary
-            SET word_target         = COALESCE(%s, word_target),
+            SET target_word         = COALESCE(%s, target_word),
                 word_target_decoded = COALESCE(%s, word_target_decoded),
                 word_class          = COALESCE(%s, word_class),
                 example_sentence    = COALESCE(%s, example_sentence),
                 explanation         = COALESCE(%s, explanation)
-            WHERE id = %s AND user_id = %s
+            WHERE user_dictionary_id = %s AND user_id = %s
             """,
-            (word_target, word_target_decoded, word_class, example_sentence, explanation, word_id, user_id),
+            (target_word, word_target_decoded, word_class, example_sentence, explanation, word_id, user_id),
         )
 
     def delete_word(self, user_id: str, word_id: str) -> None:
         self._db.execute_write(
-            "DELETE FROM user_dictionary WHERE id = %s AND user_id = %s",
+            "DELETE FROM user_dictionary WHERE user_dictionary_id = %s AND user_id = %s",
             (word_id, user_id),
         )
