@@ -117,21 +117,18 @@ def _clean_word_translation(raw: str, fallback: str = "") -> str:
     return line or fallback
 
 
-def _per_word_fallback(
-    tokens: list[str], source_lang: str, target_lang: str, fallback_service,
-) -> list[str]:
-    """Last-resort: translate each token individually via the service."""
-    result: list[str] = []
-    for token in tokens:
-        try:
-            result.append(
-                fallback_service.translate_word(
-                    token, source_lang=source_lang, target_lang=target_lang,
-                )
-            )
-        except Exception as exc:
-            result.append(f"[ERR:{exc}]")
-    return result
+def _pad_or_truncate(target_tokens: list[str], expected: int) -> list[str]:
+    """Align target token count to `expected` without making API calls.
+
+    Token-count mismatches between source and LLM output used to trigger a
+    per-word fallback (one API call per token, per offending line). On
+    rate-limited models like Claude Haiku (50 RPM) that easily produced
+    HTTP 429 storms. We now pad with '[]' or truncate instead — the comment
+    log makes the imperfection visible without flooding the API.
+    """
+    if len(target_tokens) < expected:
+        return target_tokens + ["[]"] * (expected - len(target_tokens))
+    return target_tokens[:expected]
 
 
 def _extract_word_by_word_lines(raw: str) -> list[str]:
@@ -174,7 +171,12 @@ def _parse_birkenbihl_text_response(
     target_lang: str,
     fallback_service,
 ) -> dict:
-    """Parse the plain-text Birkenbihl response and produce decoder output."""
+    """Parse the plain-text Birkenbihl response and produce decoder output.
+
+    `fallback_service` is kept in the signature for backward compatibility
+    with callers; it is no longer used. Token-count mismatches are aligned
+    via pad/truncate (see `_pad_or_truncate`) rather than per-word API calls.
+    """
     parsed_lines = _extract_word_by_word_lines(raw)
 
     line_results: dict[int, dict] = {}
@@ -186,23 +188,18 @@ def _parse_birkenbihl_text_response(
 
         if j >= len(parsed_lines):
             comments.append(
-                f"[Line {idx + 1}: LLM omitted this line — per-word fallback]"
+                f"[Line {idx + 1}: LLM omitted this line — filled with '[]' placeholders]"
             )
-            line_results[idx] = {
-                "words": _per_word_fallback(src_tokens, source_lang, target_lang, fallback_service),
-                "comments": "",
-            }
+            line_results[idx] = {"words": ["[]"] * expected, "comments": ""}
             continue
 
         target_tokens = parsed_lines[j].split()
 
         if len(target_tokens) != expected:
             comments.append(
-                f"[Line {idx + 1}: expected {expected} tokens, got {len(target_tokens)} — per-word fallback]"
+                f"[Line {idx + 1}: expected {expected} tokens, got {len(target_tokens)} — padded/truncated]"
             )
-            target_tokens = _per_word_fallback(
-                src_tokens, source_lang, target_lang, fallback_service,
-            )
+            target_tokens = _pad_or_truncate(target_tokens, expected)
 
         line_results[idx] = {"words": target_tokens, "comments": ""}
 
@@ -220,12 +217,18 @@ def _fallback_all_lines(
     fallback_service,
     reason: str,
 ) -> dict:
-    """Catastrophic-failure path: per-word translate every line."""
+    """Catastrophic-failure path: fill every line with '[]' placeholders.
+
+    Previously this fanned out per-word LLM calls, which on rate-limited
+    models caused 429 storms (50 RPM cap × many words). Now we just mark
+    every position as no-equivalent and surface the reason — the user sees
+    where it failed without further API damage.
+    """
     line_results: dict[int, dict] = {}
     for idx, src_line in source_lines:
         tokens = src_line.split()
         line_results[idx] = {
-            "words": _per_word_fallback(tokens, source_lang, target_lang, fallback_service),
+            "words": ["[]"] * len(tokens),
             "comments": "",
         }
     return {
