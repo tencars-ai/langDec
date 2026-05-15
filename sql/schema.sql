@@ -1,6 +1,17 @@
 -- langDec Database Schema
 -- PostgreSQL (psycopg v3)
--- Run this once against your Neon (neon.tech) / PostgreSQL instance.
+--
+-- AUTHORITATIVE schema definition. Reflects the state after all historical
+-- migrations have been applied. Updated whenever a new migration is added.
+--
+-- WHEN TO RUN:
+--   * Fresh dev DB (no data) — run this file once.
+--   * Prod DB                — DO NOT run this file. Prod was baselined from
+--                              schema.sql on 2026-05-15 and now holds tester
+--                              data. Schema changes on prod go via delta
+--                              migrations (sql/00N_*.sql) only.
+--
+-- See sql/README.md for the migration workflow.
 
 -- Enable UUID generation
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
