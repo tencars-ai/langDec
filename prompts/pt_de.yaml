@@ -6,7 +6,7 @@ rules: |
 
   Contractions (preposition + article) are SINGLE source tokens. Render with
   hyphen into ONE target entry:
-    do/dos     → von-dem / von-den
+    do/dos (=de+o/de+os) → von-dem / von-den
     da/das     → von-der / von-den
     no/nos     → in-dem / in-den
     na/nas     → in-der / in-den
@@ -21,6 +21,9 @@ rules: |
     vamos chegar → werden-wir ankommen
     vai chegar   → wird-er ankommen
 
+    vamos     à   praia → gehen-wir zu die Strand
+    gehen-wir zum Strand 
+
   Verbs with explicit subject pronoun (eu, tu, ele, nós, vocês): translate
   the pronoun separately. Do NOT repeat the person in the verb.
     eu tenho    → ich habe
@@ -34,9 +37,24 @@ rules: |
     a considerarem      → [] betrachten
     aparece a surfar    → erscheint [] surfen
 
+    -- bei einzeiligkeit muss [a] bei zweizeiligkeit []
+
   Comparative "do que" (e.g. "mais X do que Y"): "do" maps literally to
   "von-dem", "que" has no direct German equivalent → "[]".
     muito mais X do que Y → viel mehr X von-dem [] Y
+
+  Separable German verbs: a Portuguese verb that translates to a German verb
+  with a separable prefix MUST be ONE hyphenated target token. The German
+  prefix never stands alone as its own token — that would shift every column
+  to the right and break the alignment.
+    subi (subir)       → stieg-auf
+    desci (descer)     → stieg-ab
+    cheguei (chegar)   → kam-an
+    saí (sair)         → ging-hinaus
+    entrei (entrar)    → trat-ein
+    levantei-me        → stand-auf
+    sentei-me          → setzte-mich
+    voltei (voltar)    → kehrte-zurück
 
 # Reference outputs the LLM should emulate.
 examples:
@@ -55,6 +73,12 @@ examples:
   - source: "Quanto mais eu estudo, menos eu entendo."
     target: "Wieviel mehr ich studiere, weniger ich verstehe."
 
+  - source: "Eu subi e desci a Torre dos Clérigos."
+    target: "Ich stieg-auf und stieg-ab die Turm von-den Kleriker."
+
+  - source: "Cheguei tarde e saí cedo."
+    target: "Kam-an spät und ging-hinaus früh."
+
 # Known ambiguities — repeated in user prompt for prominence.
 disambiguation:
   - "está (3sg estar) → 'ist' — NEVER 'Das'"
@@ -62,7 +86,7 @@ disambiguation:
   - "mais → 'mehr' — NEVER 'aber' or 'als'"
   - "Quanto (in 'Quanto mais X, menos Y') → 'Wieviel' — NEVER 'Als'"
   - "agora → 'jetzt' (lowercase)"
-  - "tarde (in 'chegar tarde' / 'tarde da noite') → 'spät' — NEVER 'Nachmittag'"
+  - "tarde (in 'chegar tarde' / 'tarde da noite') → 'spät' — FALSCH: NEVER 'Nachmittag'"
   - "vi (1sg pretérito of ver) → 'sah'"
   - "que (relative pronoun with human antecedent) → 'der/die/den' by case — NEVER 'was' for persons"
   - "saudade → 'Sehnsucht' (single word, no suffix)"
@@ -73,3 +97,5 @@ critical_reminders:
   - "Use '-' only for ONE source word → multiple target words (e.g. 'vamos → werden-wir', 'à → zu-die')."
   - "Use '[]' (empty brackets) when a source word has no direct German equivalent (e.g. 'a fazer → [] machen', 'do que → von-dem [])."
   - "NEVER merge two source words into one hyphenated entry ('ter mostrado → haben-gezeigt' is FORBIDDEN)."
+  - "Separable German verbs (stieg-auf, kam-an, ging-hinaus, stand-auf) MUST be ONE hyphenated target token. The prefix (auf/ab/an/aus/ein/hin/her/zurück) NEVER stands alone — it would shift every column and destroy the alignment."
+  - "Proper nouns (place names like 'Torre dos Clérigos') still produce ONE target token per source word — translate each part, do not drop any."

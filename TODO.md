@@ -24,8 +24,8 @@
 - [x] `services/db_service.py` — connection pool, base queries
 - [x] `services/auth_service.py` — password hash, API key encryption
 - [x] Auth gate in `app.py` (login + register)
-- [ ] Run `sql/schema.sql` against Neon (neon.tech) / local PostgreSQL instance / in Prod?
-- [ ] Set `DATABASE_URL` and `SECRET_KEY` in `.streamlit/secrets.toml`
+- [x] Run `sql/schema.sql` against Neon (neon.tech) / local PostgreSQL instance / in Prod?
+- [x] Set `DATABASE_URL` and `SECRET_KEY` in `.streamlit/secrets.toml`
 
 ### Phase 2 – LLM Integration
 - [x] `services/llm_service.py` — OpenAI + Claude implementations
@@ -59,8 +59,8 @@
   ALTER TABLE texts ADD COLUMN IF NOT EXISTS notes TEXT;
   (Die anderen 3 Spalten aus Migration 003 solltest du bereits ausgeführt
   haben.)
--[ ]! Datenmodell ggf. anpassen. Pro Trabelle sprechende ID. email als unique identifier und mandatory.
--[ ] Data Modeler Agent das Modell prüfen lassen schauen lassen
+-[x] Datenmodell ggf. anpassen. Pro Trabelle sprechende ID. email als unique identifier und mandatory.
+-[x] Data Modeler Agent das Modell prüfen lassen schauen lassen
 
 
 ## Branch MVP-01 Bugs 
@@ -70,14 +70,14 @@
 
 ### Bugs Prio 1
 
--[ ] ! abfangen wenn der input Text leer ist  und auf "Decode & Translate" geklickt wird nicht sagen es sei komplett, sondern meldung: Please insert text
--[ ] wenn ich mich gerade ausgeloggt habe, hat die aktuelle seite keinen login button
--[ ] login mit einer eindeutigen emailadressse als user
+-[x] ! abfangen wenn der input Text leer ist  und auf "Decode & Translate" geklickt wird nicht sagen es sei komplett, sondern meldung: Please insert text
+-[x] wenn ich mich gerade ausgeloggt habe, hat die aktuelle seite keinen login button
+-[x] login mit einer eindeutigen emailadressse als user
 
 
 ## Branch Folder & Menu MVP-01
 ### Folder
--[ ] !! keine Rückmeldung wenn Folder angelegt wurde, und sieht man irgendwo die folder?
+-[x] !! keine Rückmeldung wenn Folder angelegt wurde, und sieht man irgendwo die folder?
 -[x] Save in Folder im Decode & Translate direct
 -[ ] "Save to text library" nicht zuklappbar sondern immer offen wie die anderen abschnitte
 
@@ -92,53 +92,6 @@
 - [x] settings und help bleiben-
  
 
- ## deployment auf prod:
- Damit das morgen glatt läuft, hier eine Pre-Deployment-Checklist — ich gehe das gerne mit dir vorher durch, jetzt nur als Vorschau,
-  was wir prüfen sollten:
-
-  1. Code & Git
-
-  - Auf welchem Branch sind wir gerade? (mvp-01 laut Git-Status zu Beginn) — soll der direkt auf main gemergt werden oder via PR?
-  - Viele geänderte Files aus dem Refactor — wir sollten die in sinnvolle Commits gruppieren statt einen Riesen-Commit zu machen (z. B.
-   "Refactor decoder to plain-text format", "Add prompt config system", "Add debug mode", "Fix logout").
-  - .streamlit/secrets.toml ist in .gitignore ✅ (aus MEMORY.md schon bekannt)
-  - Temp-Dateien im Repo (utils/*.tmp.*) — die sollten weg.
-
-  2. Datenbank
-
-  - Migration sql/005_pk_rename_and_consistency.sql auf der Prod-DB ausführen — das hatten wir frühere in dieser Session schon mal
-  bemerkt (User hatte den column "id" Fehler). Wenn Prod schon migriert ist, OK; wenn nicht, vorher migrieren.
-  - Prod-Connection-String für Neon (separater von dev?).
-
-  3. Streamlit Cloud
-
-  - App-Setup auf share.streamlit.io oder cloud.streamlit.io
-  - Secrets in der Cloud-UI eintragen (nicht im Repo):
-    - DATABASE_URL = Prod-Neon-String
-    - SECRET_KEY = ≥32-Zeichen-Fernet-Key (muss derselbe sein wie zuvor, sonst können bestehende verschlüsselte API-Keys nicht mehr
-  decryptet werden!)
-  - Python-Version in requirements.txt ggf. ergänzen (Streamlit Cloud nimmt sonst Default).
-  - requirements.txt ist aktuell — PyYAML ist drin ✅.
-
-  4. Lokaler Smoke-Test vor Commit
-
-  - App lokal starten → Login → Decode mit pt-Sätzen → check Output (das, was wir gerade fertig haben)
-  - Logout testen (sollte mit dem st.rerun()-Fix laufen)
-  - Settings testen (Debug-Toggle, API-Key-Save)
-
-  Vorschlag für die Reihenfolge morgen
-
-  1. Vorher (jetzt/abends): App lokal nochmal komplett durchklicken.
-  2. Morgen:
-    - Commits gruppieren (ich kann dir die Diffs auflisten und vorschlagen, welche Files in welchen Commit).
-    - Migrations-Schritt auf Prod-DB explizit ausführen (oder verifizieren, dass schon gemacht).
-    - Streamlit Cloud Secrets setzen.
-    - Push auf main (oder PR-merge je nach Branch-Strategie).
-    - App-Deployment auf Cloud, dann End-to-End-Test in der Cloud.
-
-  Soll ich dir morgen früh helfen, die Commits sinnvoll zu gruppieren? Dann gibst du mir nur das "Go", und ich liste dir die Files pro
-  Commit auf, du verifizierst, und dann committen wir nacheinander.
-
 ## Branch: Decoding Bugs
 -[ ] Großschreibung von "Und" und "In" mittem im Satz, "No" wird häufig als "Knoten" übersetzt, dabei ist es eine präposition 
 -[ ] sollte schon erledigt sein. Aber bitte vom Architekten Agent nochmal überprüfen lassen. Decoding ist noch recht langsam: decoder algorithmus ggf. anpassen, dass zunächst der Ganze Text im Konext übersetzt wird und dann die einzelnen wörter 1:1 übersetzt zugeordnet werden. 
@@ -146,55 +99,86 @@
 
 ## neue bugs
 - [ ] ich würde gern die linebreaks vom input auch in der tranlation Behalten
-- [x] die leiste mit der audiowiedergabe sollte direkT UNter das decoding (word-by-word). und ohne die Überschrift Audio.
+- [ ] die leiste mit der audiowiedergabe sollte direkT da sein, sobald verfügbar
 - [ ] die Überschrift "Decoding (word-by-word)" sollte "Decoded Text (word-by-word)" sein.
-- [ ] à wir Die übersetzt, erstens glaub ich das es falsch ist und es müsste im Satz ja klein geschrieben werden "die" für "a" aber "à" "a+a" heißt ja "in die" oder sowas
-- [ ] bug bei Text library. hab ein folder angelegt aber es erscheint nicht
-- [ ] "Add test manually" brauchen wir nicht, bitte diese box ausbauen
-
+- [x] à wir Die übersetzt, erstens glaub ich das es falsch ist und es müsste im Satz ja klein geschrieben werden "die" für "a" aber "à" "a+a" heißt ja "in die" oder sowas
+- [x] bug bei Text library. hab ein folder angelegt aber es erscheint nicht
+- [ ] "Add text manually" brauchen wir nicht, bitte diese box ausbauen
 - [ ] audio lässt sich nicht als brauchbare datei runterladen
-
 - [ ] erneute Decode Generierung zeigt dann den Text nicht mehr an
 - [ ] Sonderzeichen ç werden nicht immer vom originaltext zum decoded text übernommen
 - [ ] vor dem login ist das ganze Menü zu sehen, welches es dann später gar nicht mehr gibt. Ist das doppelt definiert. kann dort nicht einfach das gleiche oder gar kein menu angezeigt werden?
 - [ ] die preferences gehen verloren
-- [ ] braucht es den word für word fallback im decoder, ich will den eigentlich loswerden
+- [ ] braucht es den word für word fallback im decoder, ich will den eigentlich loswerden / vielleicht brauchen wir ihn für die google übersetzung
+
+## MVP-01 Features
+- [ ] yaml files für alle sprachen
+- [ ] sesttings überarbeiten, was sind defeault werte? Geht das decoding rudimentär auch mit google oder agros?
+- [ ] open AI auch testen
+- [ ] kann man irgendwie länger angemeldet bleiben?
+- [ ] gibt es auch ne streamlit app?
+- [ ] Mother Tongue konfigurierbar machen, standard übersetzungspaar konfigurierbar machen
+- [ ] decode macht für nicht mother tongue gar kein sinn
+- [ ] config vom doppelzeiligen umbruch nach einstellbaren wert sollte nur für die ausgabe relevant sein, im spreicherformat in der datenbank irrelevant sein, damit man es auch später ändern kann
+- [ ] wir müssen anforderungsdokument, technical concept und hilfe und so weiter aktualiseren dass es dem mvp-01 entspricht
+- [ ] vision, value proposition und wenige bikenbihl in anzeige/ hilfexten
+- [ ] sonderzeichen zur eingabe als kleine buttons je eingabe sprache über dem textfeld zur verfügung stellen
+- [ ] unterschiedliche stimmen für audio in dev und prod, brasilianisch und euro portugiesisch, soll in settings konfigurierbar sein.
+- [ ] UX auf Settings-Seite
+
+
+# nach mvp-01 erster Bug fix branch
+- [ ] decode hat mega lange gebraucht (bei tai chi aula 1 text) und dann kam nur die audio abspielzeile hoch aber das decode kommt gar nicht
+- [ ] audio sollte schon da sein, sobald es verfügbar ist, nicht erst mit decode kommen.
+- [ ] speichern kann ich den (tai chi aula 1 text jetzt auch nicht), speichern sektion fehlt genauso wie das decode reuslt, ich sehe auch keine fehlermeldung
+
+- [ ] zeilenumrüche im originaltext gehen in translation verloren (ggf. auch in decode gerade noch nicht nachvollziehbar, da decode hakt)
+
+- [T] Ich ändere den Text er aktualiert die Übersetzung und das Audi aber nicht den decodierten text nach klick auf "Decode & Translate" nach dem 2. oder 3. mal einer Textänderung und klicken des Buttons
+- [P] Eu  subi  e   desci a     Torre dos Clérigos
+      Ich stieg auf und   stieg ab    die Turm
 
 
 
 ## MVP-02 Phase
-- [ ] gibt es eine bessere Darstellungsversion für die Folder in der Text-Library? Bitte erst Vorschlag vor Änderung
-- [ ] wir bräuchten beim vorlesen eine Markierung im Text wo wir uns gerade befinden. Mindestens die Zeile besser die Worter einfach fett hervorheben. geht das irgendwie?
+- [ ] !!! Texte aus AI generieren. beim generate text auch immer den prompt mitspeicher.
 
-if promt improvement did not work we can do that:
-For improving decoding quality (capitalization, 'No'→'Knoten' bug): should we start with prompt-only improvements, or also  
-implement the two-pass architecture (translate full text first, then use that context for word-by-word mapping)?  
-## Prompt + two-pass architecture
--[ ]     Also add a pre-pass that translates the full text contextually, then feeds that as disambiguation context to the 
-     word-by-word step. More complex but potentially better quality.
 
-### Dictionary und Vokabeltrainer
+- [ ] ! gibt es eine bessere Darstellungsversion für die Folder in der Text-Library? Bitte erst Vorschlag vor Änderung
+- [ ] !! wir bräuchten beim vorlesen eine Markierung im Text wo wir uns gerade befinden. Mindestens die Zeile besser die Worter einfach fett hervorheben. geht das irgendwie?
+- [ ] AI Korrekturmodus
+
+
+ 
+### Own Dictionary
+- [ ] !! automatische historie von anfragen auch wenn es nicht direkt gespeichert wurde? die ggf. archiviert wird?
 -[ ] dictionary füllt sich automatisch mit dem was man je übersetzt hat. konzept wie es sich füllt, welche infos stehen denn dann drin?
+
+### Vokabeltrainer
 -[ ] vokabeltrainer übernimmt man wöter die man lernen will, oder es werden einem wörter aus dem häufig verwendeten übersetzungen vorgeschlagen. so bekommt man auch immer mehr beispielsätze / kontext in dem man das wort schon verwendet hat. sind das dann nur markierungen der wörter im dictonary? werden die texte dann mit den wörtern verknüpft um beispieltexte zu haben, oder wie machen wir das? Speichern wir sätze einzelnt und verknüpfen diese mit den Wötern? konzept bzw. ausprobieren.
+
 
 ## Remaining / Future
 
-## Design
-- [ ] Designvorgaben zentral und z.B. alle Buttons blau
-- [ ] als MD und als Text anzeigen
+### Design
+- [x] Designvorgaben zentral und z.B. alle Buttons blau
 - [ ] verspiele Icons oder schlichtes Design, beides testen oder umschaltbar
  
 
-## übergreifende Features
+## Text Formatierung / MD / Print 
+- [ ] als MD und als Text anzeigen
 - [ ] Immer als Text speichern und als MD anzeigen, bzw. Modus switchen können
-- [ ] immer den Ordner beim Speichern wählen könnnen
+- [x] immer den Ordner beim Speichern wählen könnnen
 
 
 ## User Story Map / Requirements
+
 -[ ] !! erklärungen, naming, vision, help editieren und birkenbihl nicht zu prominent platzieren. all in one, from zero to hero, build your own Wortschatz.
-- [ ] Was will der Nutzer eingentlich mindestens
-- [ ] translator und decoder in 2 verschiedene menüpunkte unterteilen, ggf. braucht es doch nur den einen kompinieten modus
-- [ ] beim output des translators bitte auch markdown nutzen. beim generate text auch immer den prompt mitspeicher. und auch immer den urspünglichen text speichern. Wahrscheinlich sollte jeder Text mehrere spalten in der datenbank baben. urspung, decode, translate, ...
+- [x] Was will der Nutzer eingentlich mindestens
+- [x] translator und decoder in 2 verschiedene menüpunkte unterteilen, ggf. braucht es doch nur den einen kompinieten modus
+- [ ] beim output des translators bitte auch markdown nutzen. 
+
+- [x] und auch immer den urspünglichen text speichern. Wahrscheinlich sollte jeder Text mehrere spalten in der datenbank baben. urspung, decode, translate, ...
 
 
 ## UX

@@ -4,8 +4,27 @@
 **langDec** is a language learning prototype based on the **Birkenbihl decoding method**.
 Core idea: word-for-word (decoded) translation preserving original word order + contextual translation side by side.
 
-**Status:** Prototype (Variant 1 – Streamlit)
-**Branch strategy:** `main` = stable, `dev2` = active development
+**Status:** Prototype (Variant 1 – Streamlit) — MVP-01 in production since 2026-05-15
+**Branch strategy:** `main` = stable, auto-deployed to Streamlit Cloud. All work happens on dedicated branches.
+
+---
+
+## Development workflow
+
+**Rule: never commit directly to `main`.** Every change — feature, fix, refactor, doc tweak — goes through a dedicated branch.
+
+- Feature branches: `feature/<short-name>`
+- Bug fix branches: `fix/<short-name>` (or a longer-lived batch branch like `fix/mvp-01` for a release-window bugfix series)
+- Refactor branches: `refactor/<short-name>`
+- DB schema changes: include a `sql/00N_*.sql` delta migration on the same branch (see `sql/README.md`)
+
+**Per-branch checklist before merging to `main`:**
+1. Local smoke test — start `streamlit run app.py`, exercise the changed flow + at least login/logout.
+2. If DB schema changed: delta migration tested locally and ready to apply to prod.
+3. Merge to `main` (auto-deploys to Streamlit Cloud).
+4. If schema changed: run the delta migration against the prod Neon DB after the cloud build is green.
+
+**Why this matters:** Prod holds real tester data since 2026-05-15 (Tag 0), and Streamlit Cloud auto-deploys `main`. So `main` must always be green and schema must always be migratable.
 
 ---
 

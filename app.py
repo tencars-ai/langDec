@@ -88,96 +88,97 @@ def _init_preferences(db, user_id: str) -> None:
     st.session_state.debug_mode = persisted.get("debug_mode", False)
 
 
+def _login_page() -> None:
+    """Login / register screen. Rendered with navigation hidden (see below)."""
+    st.title("langDec")
+    st.caption("Language learning via the Birkenbihl decoding method.")
+    st.markdown("---")
+
+    tab_login, tab_register = st.tabs(["Login", "Register"])
+
+    with tab_login:
+        with st.form("login_form"):
+            login_id = st.text_input("Username or Email")
+            password = st.text_input("Password", type="password")
+            login_btn = st.form_submit_button("Login", type="primary", use_container_width=True)
+
+        if login_btn:
+            if not login_id.strip() or not password:
+                st.error("Please enter username or email and password.")
+            else:
+                try:
+                    db, auth, build_llm = _get_services()
+                    identifier = login_id.strip()
+                    user = db.execute_one(
+                        "SELECT user_id, username, password_hash FROM users"
+                        " WHERE username = %s OR email = %s",
+                        (identifier, identifier),
+                    )
+                    if user and auth.verify_password(password, user["password_hash"]):
+                        st.session_state.user_id = str(user["user_id"])
+                        st.session_state.username = user["username"] or identifier
+                        _load_llm_service(db, auth, build_llm, str(user["user_id"]))
+                        _init_preferences(db, str(user["user_id"]))
+                        st.rerun()
+                    else:
+                        st.error("Invalid username/email or password.")
+                except Exception as e:
+                    st.error(f"Login failed: {e}")
+
+    with tab_register:
+        with st.form("register_form"):
+            new_username = st.text_input("Choose a username", key="reg_user")
+            new_email = st.text_input("Email", key="reg_email")
+            new_pw = st.text_input("Password", type="password", key="reg_pw")
+            new_pw2 = st.text_input("Confirm password", type="password", key="reg_pw2")
+            register_btn = st.form_submit_button("Register", type="primary", use_container_width=True)
+
+        if register_btn:
+            if not new_username.strip():
+                st.error("Username is required.")
+            elif not new_email.strip():
+                st.error("Email is required.")
+            elif "@" not in new_email:
+                st.error("Please enter a valid email address.")
+            elif len(new_pw) < 8:
+                st.error("Password must be at least 8 characters.")
+            elif new_pw != new_pw2:
+                st.error("Passwords do not match.")
+            else:
+                try:
+                    db, auth, build_llm = _get_services()
+                    existing_user = db.execute_one(
+                        "SELECT user_id FROM users WHERE username = %s", (new_username.strip(),)
+                    )
+                    if existing_user:
+                        st.error("Username already taken.")
+                    else:
+                        existing_email = db.execute_one(
+                            "SELECT user_id FROM users WHERE email = %s", (new_email.strip(),)
+                        )
+                        if existing_email:
+                            st.error("An account with this email already exists.")
+                        else:
+                            pw_hash = auth.hash_password(new_pw)
+                            user = db.execute_returning(
+                                "INSERT INTO users (username, email, password_hash) VALUES (%s, %s, %s) RETURNING user_id",
+                                (new_username.strip(), new_email.strip(), pw_hash),
+                            )
+                            st.session_state.user_id = str(user["user_id"])
+                            st.session_state.username = new_username.strip()
+                            st.session_state.llm_service = None
+                            st.session_state.llm_services = {}
+                            _init_preferences(db, str(user["user_id"]))
+                            st.rerun()
+                except Exception as e:
+                    st.error(f"Registration failed: {e}")
+
+
 # -------------------------------------------------------
-# Logged in → run navigation
+# Navigation: full menu once logged in, hidden while on the login screen
 # -------------------------------------------------------
 if "user_id" in st.session_state:
     pg = st.navigation(PAGES)
-    pg.run()
-    st.stop()
-
-# -------------------------------------------------------
-# Not logged in → show login / register
-# -------------------------------------------------------
-st.title("langDec")
-st.caption("Language learning via the Birkenbihl decoding method.")
-st.markdown("---")
-
-tab_login, tab_register = st.tabs(["Login", "Register"])
-
-with tab_login:
-    with st.form("login_form"):
-        login_id = st.text_input("Username or Email")
-        password = st.text_input("Password", type="password")
-        login_btn = st.form_submit_button("Login", type="primary", use_container_width=True)
-
-    if login_btn:
-        if not login_id.strip() or not password:
-            st.error("Please enter username or email and password.")
-        else:
-            try:
-                db, auth, build_llm = _get_services()
-                identifier = login_id.strip()
-                user = db.execute_one(
-                    "SELECT user_id, username, password_hash FROM users"
-                    " WHERE username = %s OR email = %s",
-                    (identifier, identifier),
-                )
-                if user and auth.verify_password(password, user["password_hash"]):
-                    st.session_state.user_id = str(user["user_id"])
-                    st.session_state.username = user["username"] or identifier
-                    _load_llm_service(db, auth, build_llm, str(user["user_id"]))
-                    _init_preferences(db, str(user["user_id"]))
-                    st.rerun()
-                else:
-                    st.error("Invalid username/email or password.")
-            except Exception as e:
-                st.error(f"Login failed: {e}")
-
-with tab_register:
-    with st.form("register_form"):
-        new_username = st.text_input("Choose a username", key="reg_user")
-        new_email = st.text_input("Email", key="reg_email")
-        new_pw = st.text_input("Password", type="password", key="reg_pw")
-        new_pw2 = st.text_input("Confirm password", type="password", key="reg_pw2")
-        register_btn = st.form_submit_button("Register", type="primary", use_container_width=True)
-
-    if register_btn:
-        if not new_username.strip():
-            st.error("Username is required.")
-        elif not new_email.strip():
-            st.error("Email is required.")
-        elif "@" not in new_email:
-            st.error("Please enter a valid email address.")
-        elif len(new_pw) < 8:
-            st.error("Password must be at least 8 characters.")
-        elif new_pw != new_pw2:
-            st.error("Passwords do not match.")
-        else:
-            try:
-                db, auth, build_llm = _get_services()
-                existing_user = db.execute_one(
-                    "SELECT user_id FROM users WHERE username = %s", (new_username.strip(),)
-                )
-                if existing_user:
-                    st.error("Username already taken.")
-                else:
-                    existing_email = db.execute_one(
-                        "SELECT user_id FROM users WHERE email = %s", (new_email.strip(),)
-                    )
-                    if existing_email:
-                        st.error("An account with this email already exists.")
-                    else:
-                        pw_hash = auth.hash_password(new_pw)
-                        user = db.execute_returning(
-                            "INSERT INTO users (username, email, password_hash) VALUES (%s, %s, %s) RETURNING user_id",
-                            (new_username.strip(), new_email.strip(), pw_hash),
-                        )
-                        st.session_state.user_id = str(user["user_id"])
-                        st.session_state.username = new_username.strip()
-                        st.session_state.llm_service = None
-                        st.session_state.llm_services = {}
-                        _init_preferences(db, str(user["user_id"]))
-                        st.rerun()
-            except Exception as e:
-                st.error(f"Registration failed: {e}")
+else:
+    pg = st.navigation([st.Page(_login_page, title="Login")], position="hidden")
+pg.run()

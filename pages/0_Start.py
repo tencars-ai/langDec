@@ -45,6 +45,8 @@ for key in ("input_text", "start_output", "start_decoded", "start_translated", "
         st.session_state[key] = ""
 if "start_audio" not in st.session_state:
     st.session_state.start_audio = None  # bytes or None
+if "start_errors" not in st.session_state:
+    st.session_state.start_errors = []  # list[str]
 for key in ("show_camera", "show_browse"):
     if key not in st.session_state:
         st.session_state[key] = False
@@ -140,35 +142,87 @@ decode_translate_clicked = st.button("Decode & Translate", type="primary", use_c
 #         pass
 
 # --- Output slots: populated live during processing or from session state on re-renders ---
-# Order: Translation first (fastest), then Decoding (audio embedded above the textarea), then Notes.
+# Order: Translation → Audio (its own component) → Decoding → Notes → Debug → Errors.
 _translated_slot = st.empty()
+_audio_slot = st.empty()
 _decoded_slot = st.empty()
 _notes_slot = st.empty()
+_debug_slot = st.empty()
+_error_slot = st.empty()
 
 
-def _render_decoded_section(slot, decoded: str, audio_bytes, key: str) -> None:
-    """Render the Decoding section with audio between heading and text area."""
-    if not decoded and not audio_bytes:
+def _md_preserve_breaks(text: str) -> str:
+    """Make single \\n render as a line break in st.markdown.
+
+    Markdown collapses a single newline into a space. Two trailing spaces
+    before \\n is the official hard-break syntax. \\n\\n still works as a
+    paragraph break because the trailing spaces sit on an otherwise blank line.
+    """
+    return (text or "").replace("\n", "  \n")
+
+
+def _render_audio_section(slot, audio_bytes) -> None:
+    """Audio is its own UX component, rendered as soon as TTS is ready."""
+    if not audio_bytes:
         return
     with slot.container():
+        st.markdown("#### 🔊 Audio")
+        st.audio(audio_bytes, format="audio/mp3")
+
+
+_DECODED_WIDGET_KEY = "decoded_output_widget"
+
+
+def _render_decoded_section(slot, decoded: str) -> None:
+    """Render the Decoding section (text only — audio is separate).
+
+    Why: Streamlit ignores `value=` on a widget whose `key` already exists in
+    session_state, so a plain `st.text_area(..., value=new, key=k)` keeps
+    showing the first decode after subsequent clicks. We write to
+    session_state[key] before rendering and omit `value=`.
+    """
+    if not decoded:
+        return
+    st.session_state[_DECODED_WIDGET_KEY] = decoded
+    with slot.container():
         st.markdown("#### 🔤 Decoding (word-by-word)")
-        if audio_bytes:
-            st.audio(audio_bytes, format="audio/mp3")
-        if decoded:
-            st.text_area(
-                "Decoded",
-                value=decoded,
-                height=200,
-                key=key,
-                label_visibility="collapsed",
-                help="Monospace alignment — original word above, literal translation below.",
-            )
+        st.text_area(
+            "Decoded",
+            height=200,
+            key=_DECODED_WIDGET_KEY,
+            label_visibility="collapsed",
+            help="Monospace alignment — original word above, literal translation below.",
+        )
+
+
+def _render_debug_section(slot, debug_info: str) -> None:
+    if not debug_info:
+        return
+    with slot.container():
+        with st.expander("🔍 Debug: raw LLM payloads per chunk", expanded=False):
+            st.code(debug_info, language="json")
+
+
+def _render_error_section(slot, errors: list[str]) -> None:
+    if not errors:
+        return
+    with slot.container():
+        for msg in errors:
+            st.error(msg)
 
 # --- Decode & Translate & Audio logic ---
 if decode_translate_clicked:
     if not input_text.strip():
         st.warning("Please enter some text first.")
     else:
+        # Reset transient outputs for this click so the previous run does not leak in.
+        st.session_state.start_decoded = ""
+        st.session_state.start_translated = ""
+        st.session_state.start_comments = ""
+        st.session_state.start_debug = ""
+        st.session_state.start_audio = None
+        st.session_state.start_errors = []
+
         with st.status("Processing…", expanded=True) as _status:
             _stripped = input_text.strip()
 
@@ -196,31 +250,21 @@ if decode_translate_clicked:
                             st.write("✅ Translation done")
                             with _translated_slot.container():
                                 st.markdown("#### 🌐 Translation (natural)")
-                                st.markdown(_t)
+                                st.markdown(_md_preserve_breaks(_t))
                         except Exception as _e:
-                            st.write(f"❌ Translation error: {_e}")
-                            st.session_state.start_translated = ""
+                            err = f"Translation failed: {type(_e).__name__}: {_e}"
+                            st.write(f"❌ {err}")
+                            st.session_state.start_errors.append(err)
 
                     elif _future is _future_audio:
                         try:
                             st.session_state.start_audio = _future.result()
                             st.write("✅ Audio ready")
-                            # If decode already finished, render audio in its own slot so we
-                            # don't re-render the decoded section (which would reuse its key).
-                            if st.session_state.start_decoded:
-                                with _decoded_slot.container():
-                                    st.markdown("#### 🔤 Decoding (word-by-word)")
-                                    st.audio(st.session_state.start_audio, format="audio/mp3")
-                                    st.text_area(
-                                        "Decoded",
-                                        value=st.session_state.start_decoded,
-                                        height=200,
-                                        key="decoded_live_with_audio",
-                                        label_visibility="collapsed",
-                                    )
+                            _render_audio_section(_audio_slot, st.session_state.start_audio)
                         except Exception as _e:
-                            st.write(f"❌ Audio error: {_e}")
-                            st.session_state.start_audio = None
+                            err = f"Audio (TTS) failed: {type(_e).__name__}: {_e}"
+                            st.write(f"❌ {err}")
+                            st.session_state.start_errors.append(err)
 
                     else:  # decode
                         try:
@@ -229,22 +273,27 @@ if decode_translate_clicked:
                             st.session_state.start_comments = _r.comments
                             st.session_state.start_debug = _r.debug_info
                             st.write("✅ Decoding done")
-                            _render_decoded_section(
-                                _decoded_slot, _r.aligned_text,
-                                st.session_state.start_audio, key="decoded_live",
-                            )
+                            if _r.aligned_text.strip():
+                                _render_decoded_section(
+                                    _decoded_slot, _r.aligned_text,
+                                )
+                            else:
+                                err = (
+                                    "Decoder produced no output. "
+                                    "See Hints/Debug below for why."
+                                )
+                                st.write(f"⚠️ {err}")
+                                st.session_state.start_errors.append(err)
+
                             if _r.comments:
                                 with _notes_slot.container():
                                     st.markdown("#### 📝 Hints")
                                     st.info(_r.comments)
-                            if _r.debug_info:
-                                with st.expander("🔍 Debug: raw LLM response", expanded=False):
-                                    st.code(_r.debug_info, language="json")
+                            _render_debug_section(_debug_slot, _r.debug_info)
                         except Exception as _e:
-                            st.write(f"❌ Decoding error: {_e}")
-                            st.session_state.start_decoded = ""
-                            st.session_state.start_comments = ""
-                            st.session_state.start_debug = ""
+                            err = f"Decoding failed: {type(_e).__name__}: {_e}"
+                            st.write(f"❌ {err}")
+                            st.session_state.start_errors.append(err)
 
             _status.update(label="Done!", state="complete")
 
@@ -255,29 +304,37 @@ if decode_translate_clicked:
                if st.session_state.start_comments else "")
         )
 
+        # Show errors at the bottom (above Save) so they survive into the
+        # re-render path below as well.
+        _render_error_section(_error_slot, st.session_state.start_errors)
+
 # --- Populate output slots on page re-renders (NOT during the click pass,
-# where the live renders inside the click block have already filled them
-# with key="decoded_live" / "decoded_live_with_audio") ---
+# where the live renders inside the click block have already filled them) ---
 if not decode_translate_clicked:
     if st.session_state.start_translated:
         with _translated_slot.container():
             st.markdown("#### 🌐 Translation (natural)")
-            st.markdown(st.session_state.start_translated)
+            st.markdown(_md_preserve_breaks(st.session_state.start_translated))
 
-    _render_decoded_section(
-        _decoded_slot,
-        st.session_state.start_decoded,
-        st.session_state.start_audio,
-        key="decoded_state",
-    )
+    _render_audio_section(_audio_slot, st.session_state.start_audio)
+    _render_decoded_section(_decoded_slot, st.session_state.start_decoded)
 
     if st.session_state.start_comments:
         with _notes_slot.container():
             st.markdown("#### 📝 Notes")
             st.info(st.session_state.start_comments)
 
-# --- Save to text library ---
-if st.session_state.start_output:
+    _render_debug_section(_debug_slot, st.session_state.start_debug)
+    _render_error_section(_error_slot, st.session_state.start_errors)
+
+# --- Save to text library (independent of decode result: translation + audio
+# alone are valid reasons to save the source text). ---
+_has_anything_to_save = bool(
+    st.session_state.start_decoded
+    or st.session_state.start_translated
+    or st.session_state.start_audio
+)
+if _has_anything_to_save:
     save_to_library(
         input_text.strip(),
         source_language,
