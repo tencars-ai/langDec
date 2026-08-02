@@ -170,17 +170,26 @@ def _render_audio_section(slot, audio_bytes) -> None:
         st.audio(audio_bytes, format="audio/mp3")
 
 
-def _render_decoded_section(slot, decoded: str, key: str) -> None:
-    """Render the Decoding section (text only — audio is separate)."""
+_DECODED_WIDGET_KEY = "decoded_output_widget"
+
+
+def _render_decoded_section(slot, decoded: str) -> None:
+    """Render the Decoding section (text only — audio is separate).
+
+    Why: Streamlit ignores `value=` on a widget whose `key` already exists in
+    session_state, so a plain `st.text_area(..., value=new, key=k)` keeps
+    showing the first decode after subsequent clicks. We write to
+    session_state[key] before rendering and omit `value=`.
+    """
     if not decoded:
         return
+    st.session_state[_DECODED_WIDGET_KEY] = decoded
     with slot.container():
         st.markdown("#### 🔤 Decoding (word-by-word)")
         st.text_area(
             "Decoded",
-            value=decoded,
             height=200,
-            key=key,
+            key=_DECODED_WIDGET_KEY,
             label_visibility="collapsed",
             help="Monospace alignment — original word above, literal translation below.",
         )
@@ -266,7 +275,7 @@ if decode_translate_clicked:
                             st.write("✅ Decoding done")
                             if _r.aligned_text.strip():
                                 _render_decoded_section(
-                                    _decoded_slot, _r.aligned_text, key="decoded_live",
+                                    _decoded_slot, _r.aligned_text,
                                 )
                             else:
                                 err = (
@@ -308,9 +317,7 @@ if not decode_translate_clicked:
             st.markdown(_md_preserve_breaks(st.session_state.start_translated))
 
     _render_audio_section(_audio_slot, st.session_state.start_audio)
-    _render_decoded_section(
-        _decoded_slot, st.session_state.start_decoded, key="decoded_state",
-    )
+    _render_decoded_section(_decoded_slot, st.session_state.start_decoded)
 
     if st.session_state.start_comments:
         with _notes_slot.container():
