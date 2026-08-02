@@ -6,7 +6,7 @@ rules: |
 
   Contractions (preposition + article) are SINGLE source tokens. Render with
   hyphen into ONE target entry:
- --   de+o = do/ de+os= dos     → von-dem / von-den
+    do/dos (=de+o/de+os) → von-dem / von-den
     da/das     → von-der / von-den
     no/nos     → in-dem / in-den
     na/nas     → in-der / in-den
