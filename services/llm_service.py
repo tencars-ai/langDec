@@ -8,8 +8,9 @@ The LLM is asked to return one whitespace-tokenized line per source line.
 Hyphens mark multi-word targets for a single source word ("werden-wir");
 empty "[]" marks source words with no direct target equivalent.
 
-The per-line token count is verified by the parser; mismatched lines fall
-back to per-word translation.
+The per-line token count is verified by the parser. A mismatched line gets
+ONE retry call for that line alone (not per-word — see `_retry_single_line`);
+if the retry still doesn't match, the line is pad/truncated as a last resort.
 """
 from __future__ import annotations
 
@@ -69,6 +70,10 @@ class LLMService(ABC):
                   "comments": "<aggregated notes/errors>",
                   "raw_payload": {"raw_text": "...", "parsed_lines": [...]}}
         """
+        raise NotImplementedError
+
+    def _complete(self, system: str, user: str, max_tokens: int = 1024) -> str:
+        """Single raw completion call, used by the one-line mismatch retry."""
         raise NotImplementedError
 
 
@@ -164,18 +169,46 @@ def _extract_word_by_word_lines(raw: str) -> list[str]:
     return result
 
 
+def _retry_single_line(service, cfg, src_line: str, expected: int) -> Optional[list[str]]:
+    """One extra completion call to fix a single mismatched line.
+
+    Bounded to exactly one call per offending line (not per word), so it
+    can't reproduce the 429 storm the per-word fallback used to cause.
+    Returns the corrected tokens, or None if the retry failed / still
+    doesn't match — callers should fall back to pad/truncate in that case.
+    """
+    system = build_system_prompt(cfg)
+    user = build_user_prompt(cfg, [src_line]) + (
+        "\n\nCORRECTION RETRY: your previous answer for this exact line had "
+        f"the wrong token count. Return EXACTLY {expected} whitespace-separated "
+        "tokens — recount before answering."
+    )
+    try:
+        raw = service._complete(system, user, max_tokens=256)
+    except Exception:
+        return None
+    parsed = _extract_word_by_word_lines(raw)
+    if not parsed:
+        return None
+    tokens = parsed[0].split()
+    return tokens if len(tokens) == expected else None
+
+
 def _parse_birkenbihl_text_response(
     raw: str,
     source_lines: list[tuple[int, str]],
     source_lang: str,
     target_lang: str,
     fallback_service,
+    cfg,
 ) -> dict:
     """Parse the plain-text Birkenbihl response and produce decoder output.
 
-    `fallback_service` is kept in the signature for backward compatibility
-    with callers; it is no longer used. Token-count mismatches are aligned
-    via pad/truncate (see `_pad_or_truncate`) rather than per-word API calls.
+    A line whose token count doesn't match the source gets one single-line
+    retry call via `fallback_service` (see `_retry_single_line`). Only if
+    that retry also fails/mismatches do we fall back to pad/truncate —
+    padding/truncating a mid-line mismatch shifts every token after the
+    divergence point, which reads as garbled rather than merely incomplete.
     """
     parsed_lines = _extract_word_by_word_lines(raw)
 
@@ -196,10 +229,18 @@ def _parse_birkenbihl_text_response(
         target_tokens = parsed_lines[j].split()
 
         if len(target_tokens) != expected:
-            comments.append(
-                f"[Line {idx + 1}: expected {expected} tokens, got {len(target_tokens)} — padded/truncated]"
-            )
-            target_tokens = _pad_or_truncate(target_tokens, expected)
+            got = len(target_tokens)
+            retried = _retry_single_line(fallback_service, cfg, src_line, expected)
+            if retried is not None:
+                target_tokens = retried
+                comments.append(
+                    f"[Line {idx + 1}: expected {expected} tokens, got {got} — corrected via single-line retry]"
+                )
+            else:
+                comments.append(
+                    f"[Line {idx + 1}: expected {expected} tokens, got {got} — padded/truncated]"
+                )
+                target_tokens = _pad_or_truncate(target_tokens, expected)
 
         line_results[idx] = {"words": target_tokens, "comments": ""}
 
@@ -248,7 +289,7 @@ def _prepare_decode_call(text: str, source_lang: str, target_lang: str):
     non_empty = [line for _, line in source_lines]
     system = build_system_prompt(cfg)
     user = build_user_prompt(cfg, non_empty)
-    return source_lines, system, user
+    return source_lines, system, user, cfg
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +324,9 @@ class OpenAIService(LLMService):
             timeout=self._REQUEST_TIMEOUT,
         )
         return response.choices[0].message.content.strip()
+
+    def _complete(self, system: str, user: str, max_tokens: int = 1024) -> str:
+        return self._chat(system, user, max_tokens=max_tokens)
 
     def translate_word(
         self,
@@ -357,7 +401,7 @@ class OpenAIService(LLMService):
         prep = _prepare_decode_call(text, source_lang, target_lang)
         if prep is None:
             return {"line_results": {}, "comments": "", "raw_payload": None}
-        source_lines, system, user = prep
+        source_lines, system, user, cfg = prep
 
         try:
             raw = self._chat(system, user, max_tokens=4096)
@@ -368,7 +412,7 @@ class OpenAIService(LLMService):
             )
 
         return _parse_birkenbihl_text_response(
-            raw, source_lines, source_lang, target_lang, self,
+            raw, source_lines, source_lang, target_lang, self, cfg,
         )
 
 
@@ -401,6 +445,9 @@ class ClaudeService(LLMService):
             timeout=self._REQUEST_TIMEOUT,
         )
         return response.content[0].text.strip()
+
+    def _complete(self, system: str, user: str, max_tokens: int = 1024) -> str:
+        return self._message(system, user, max_tokens=max_tokens)
 
     def translate_word(
         self,
@@ -475,7 +522,7 @@ class ClaudeService(LLMService):
         prep = _prepare_decode_call(text, source_lang, target_lang)
         if prep is None:
             return {"line_results": {}, "comments": "", "raw_payload": None}
-        source_lines, system, user = prep
+        source_lines, system, user, cfg = prep
 
         try:
             raw = self._message(system, user, max_tokens=4096)
@@ -486,7 +533,7 @@ class ClaudeService(LLMService):
             )
 
         return _parse_birkenbihl_text_response(
-            raw, source_lines, source_lang, target_lang, self,
+            raw, source_lines, source_lang, target_lang, self, cfg,
         )
 
 
