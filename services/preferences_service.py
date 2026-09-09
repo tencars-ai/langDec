@@ -14,7 +14,7 @@ from services.db_service import DBService
 DEFAULTS: dict[str, Any] = {
     "decode_service_name": None,
     "translate_service_name": "Google Translate",
-    "max_line_length": 65,
+    "max_line_length": 40,
     "ocr_line_height_threshold": 30,
     "debug_mode": False,
 }

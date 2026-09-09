@@ -83,7 +83,7 @@ def _init_preferences(db, user_id: str) -> None:
     st.session_state.decode_service_name = (
         persisted.get("decode_service_name") or _decode_default()
     )
-    st.session_state.max_line_length = persisted.get("max_line_length", 65)
+    st.session_state.max_line_length = persisted.get("max_line_length", 40)
     st.session_state.ocr_line_height_threshold = persisted.get("ocr_line_height_threshold", 30)
     st.session_state.debug_mode = persisted.get("debug_mode", False)
 

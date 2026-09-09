@@ -84,7 +84,7 @@ st.markdown("**Decoder Output**")
 max_line_length = st.number_input(
     "Line break after number of characters (0 = disabled)",
     min_value=0, max_value=300,
-    value=st.session_state.get("max_line_length", 65),
+    value=st.session_state.get("max_line_length", 40),
     step=5,
     key="max_line_length_input",
 )
