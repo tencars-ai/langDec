@@ -41,7 +41,7 @@ def get_translate_service():
 
 
 def get_max_line_length() -> int:
-    return st.session_state.get("max_line_length", 65)
+    return st.session_state.get("max_line_length", 40)
 
 
 def get_ocr_threshold() -> int:

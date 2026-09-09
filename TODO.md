@@ -147,6 +147,7 @@
 - [ ] ! gibt es eine bessere Darstellungsversion für die Folder in der Text-Library? Bitte erst Vorschlag vor Änderung
 - [ ] !! wir bräuchten beim vorlesen eine Markierung im Text wo wir uns gerade befinden. Mindestens die Zeile besser die Worter einfach fett hervorheben. geht das irgendwie?
 - [ ] AI Korrekturmodus
+- [ ] Preference-Default-Werte (z.B. max_line_length) sind aktuell an mehreren Stellen im Code dupliziert (app.py, utils/services_ui.py, services/preferences_service.py, pages/8_Settings.py, sql/schema.sql) — sollten zentral an einer Stelle definiert werden.
 
 
  
