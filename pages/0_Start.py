@@ -173,6 +173,17 @@ def _render_audio_section(slot, audio_bytes) -> None:
 _DECODED_WIDGET_KEY = "decoded_output_widget"
 
 
+@st.dialog("🔤 Decoding (word-by-word)", width="large")
+def _decoded_fullscreen_dialog(decoded: str) -> None:
+    st.text_area(
+        "Decoded",
+        value=decoded,
+        height=500,
+        label_visibility="collapsed",
+        help="Monospace alignment — original word above, literal translation below.",
+    )
+
+
 def _render_decoded_section(slot, decoded: str) -> None:
     """Render the Decoding section (text only — audio is separate).
 
@@ -185,10 +196,15 @@ def _render_decoded_section(slot, decoded: str) -> None:
         return
     st.session_state[_DECODED_WIDGET_KEY] = decoded
     with slot.container():
-        st.markdown("#### 🔤 Decoding (word-by-word)")
+        header_col, button_col = st.columns([5, 1])
+        with header_col:
+            st.markdown("#### 🔤 Decoding (word-by-word)")
+        with button_col:
+            if st.button("⛶ Fullscreen", key="decoded_fullscreen_btn", use_container_width=True):
+                _decoded_fullscreen_dialog(decoded)
         st.text_area(
             "Decoded",
-            height=200,
+            height=280,
             key=_DECODED_WIDGET_KEY,
             label_visibility="collapsed",
             help="Monospace alignment — original word above, literal translation below.",
