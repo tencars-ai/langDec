@@ -173,7 +173,7 @@ def _render_audio_section(slot, audio_bytes) -> None:
 _DECODED_WIDGET_KEY = "decoded_output_widget"
 
 
-@st.dialog("🔤 Decoding (word-by-word)", width="large")
+@st.dialog("🔤 Decoding", width="large")
 def _decoded_fullscreen_dialog(decoded: str) -> None:
     st.text_area(
         "Decoded",
