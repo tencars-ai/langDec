@@ -1,5 +1,12 @@
 # TODO – langDec
 
+> **Konzeptarbeit 2026-08-08 (Branch `verbiverse-concept`):** Einstieg über
+> [`documents/vokabeluniversum_overview.md`](documents/vokabeluniversum_overview.md).
+> Mehrere Punkte unten sind dort konzeptionell beantwortet — insbesondere Zeile 122
+> (Speicherformat unabhängig vom Umbruch), 154/155 (Wörterbuch füllt sich selbst),
+> 158 (Vokabeltrainer mit Beispielsätzen), 193 (klickbare Wörter) und 115 (YAML pro Sprache).
+> Noch **nichts davon umgesetzt** — es sind Vorschläge zum Review.
+
 ## Refactoring (completed 2026-03-07)
 
 - [x] **psycopg version conflict fixed**
