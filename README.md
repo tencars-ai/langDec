@@ -53,7 +53,7 @@ The architecture is **language-agnostic** and designed for easy expansion to add
 | UI | Streamlit (multi-page) |
 | Auth | Login/register with bcrypt-hashed passwords in PostgreSQL |
 | LLM | OpenAI API + Anthropic Claude API (primary translation & generation) |
-| Translation fallback | Google Translate (deep-translator), Argos Translate (offline) |
+| Translation fallback | Google Translate (direct web request), Argos Translate (offline) |
 | Database | PostgreSQL on Neon (neon.tech), accessed via psycopg v3 |
 | TTS | gTTS (Google Text-to-Speech), MP3 stored as BYTEA in PostgreSQL |
 | OCR | EasyOCR (images + PDF via PyMuPDF) |

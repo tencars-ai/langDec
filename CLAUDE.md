@@ -39,7 +39,7 @@ Core idea: word-for-word (decoded) translation preserving original word order + 
 | LLM | OpenAI SDK + Anthropic SDK (primary translation + generation) |
 | TTS | gTTS (Google Text-to-Speech) |
 | OCR | EasyOCR (default), Tesseract (alternative) |
-| Translation (fallback) | deep-translator (Google), Argos Translate (offline) |
+| Translation (fallback) | Google Translate (direct web request, no SDK), Argos Translate (offline) |
 | Audio storage | PostgreSQL BYTEA |
 | PDF handling | PyMuPDF (fitz) |
 
@@ -141,7 +141,7 @@ alone. See `documents/decoder-prompting-rules.md` §7.
 |---|---|---|
 | `OpenAIService` | LLM (primary) | Requires OpenAI API key stored in DB |
 | `ClaudeService` | LLM (primary) | Requires Anthropic API key stored in DB |
-| `GoogleDeepTranslatorService` | Online (fallback) | Requires internet, uses deep-translator |
+| `GoogleDeepTranslatorService` | Online (fallback) | Requires internet; calls Google's public translate.google.com/m endpoint directly (`requests` + `beautifulsoup4`, no SDK) |
 | `ArgosTranslateService` | Offline (fallback) | Requires language pack download |
 | `DictCcTranslationService` | Local DB (hidden) | Lazy init; not shown in UI by default |
 
