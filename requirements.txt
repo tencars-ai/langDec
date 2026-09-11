@@ -1,7 +1,8 @@
 streamlit
 psycopg[binary]
 psycopg-pool
-deep-translator
+requests
+beautifulsoup4
 argostranslate
 easyocr
 pillow
