@@ -1,20 +1,19 @@
 # Code-Review langDec — August 2026
 
-**Stand:** 2026-08-08 · **Branch:** `verbiverse-concept` · **Umfang:** `app.py`, `pages/`,
-`domain/`, `services/`, `utils/`, `prompts/`, `sql/`, `tests/`
+**Stand:** 2026-08-08 · **Umfang:** `app.py`, `pages/`, `domain/`, `services/`, `utils/`,
+`prompts/`, `sql/`, `tests/`
 
 **Dies ist ein Bericht. Es wurde nichts behoben.** Jeder Befund nennt Datei und Zeile und wurde
-gegen den Code dieses Branches geprüft.
+gegen den damaligen Code geprüft.
 
-Der Anlass: die Konzeptarbeit am [Vokabeluniversum](vokabeluniversum_concept.md) hat mehrere
-Stellen freigelegt, an denen der Code nicht das tut, was die Dokumentation behauptet — und zwei
-Fehler, die harmlos aussehen, aber gefährlich werden, sobald Tokens persistiert werden.
+Ein gezielter Review hat mehrere Stellen freigelegt, an denen der Code nicht das tut, was die
+Dokumentation behauptet — sowie einen Fehler, der harmlos aussieht, aber ohne jede Fehlermeldung
+Inhalte verschwinden lässt.
 
 **Einordnung:** die Codebasis ist mit **5.093 Zeilen** klein und in erkennbar gutem Zustand. Die
 Schichtung `pages/` → `domain/` → `services/` ist konsequent durchgehalten, `domain/` ist frei von
-UI-Kopplung, und die Docstrings gehören zum Besten, was ich in einem Prototyp dieser Größe gesehen
-habe (siehe [`coding_standards.md`](coding_standards.md), das genau daraus die Regeln ableitet).
-Die Befunde unten sind Detailarbeit, kein struktureller Sanierungsfall.
+UI-Kopplung, und die Docstrings gehören zum Besten, was in einem Prototyp dieser Größe zu erwarten
+ist. Die Befunde unten sind Detailarbeit, kein struktureller Sanierungsfall.
 
 ---
 
@@ -22,7 +21,8 @@ Die Befunde unten sind Detailarbeit, kein struktureller Sanierungsfall.
 
 ### A1 — `zip()` lässt ganze Zeilen still verschwinden
 
-**`domain/decoder.py:306-309`** · Schweregrad: **hoch**, sobald Tokens persistiert werden
+**`domain/decoder.py:306-309`** · Schweregrad: **niedrig** — kosmetisch, aber ohne jede
+Fehlermeldung
 
 ```python
 pairs = [
@@ -34,19 +34,15 @@ pairs = [
 `zip` kürzt auf die kürzere Seite. Fehlt für eine Zeile ein `line_results`-Eintrag — weil das LLM
 sie ausgelassen hat, oder weil die Index-Rückabbildung in `_decode_chunk` (`decoder.py:256-259`)
 unterfüllt, wenn `len(local_indices) < len(chunk)` — ist `translated_words` leer und **die gesamte
-Zeile verschwindet aus der Ausgabe**. Ohne Fehlermeldung.
-
-Heute ist das kosmetisch: der Nutzer sieht eine Zeile weniger. Mit persistierten Tokens wird es
-eine **Datenintegritätsfrage**: Token-Indizes und Satznummern verschöben sich gegenüber
-`texts.content`, und die gespeicherte Tokentabelle widerspräche stillschweigend dem Quelltext.
+Zeile verschwindet aus der Ausgabe**. Der Nutzer sieht schlicht eine Zeile weniger im decodierten
+Text, ohne jeden Hinweis darauf, dass etwas fehlt.
 
 **Behebung:** den Zeilenaufbau von der **Quelle** treiben, `target_token` leer lassen wo keine
-Übersetzung vorliegt. Die Zeilenzahl wird damit eine reine Funktion des Quelltexts — genau das
-macht Token-Indizes stabil und DB-Zeilen idempotent wiederbeschreibbar.
+Übersetzung vorliegt. Die Zeilenzahl wird damit eine reine Funktion des Quelltexts.
 
 **Achtung:** die Behebung **ändert `aligned_text` im Fehlerfall** (fehlende Zeile erscheint mit
-Leerstellen statt zu verschwinden). Deshalb als **eigener, angekündigter Commit** nach dem
-byte-identischen Renderer-Refactor, nicht vermischt.
+Leerstellen statt zu verschwinden). Deshalb als **eigener, angekündigter Commit**, nicht mit
+anderen Änderungen vermischt.
 
 ### A2 — Sprachnamen erreichen den Prompt als ISO-Codes
 
@@ -121,8 +117,7 @@ Wachstum künftig **sichtbar** wird.
 | C3 | **Eigene `LANGUAGES`-Kopie** | `pages/4_Dictionary.py:24` | Wortgleich mit `utils/ui.py:LANGUAGES_WITH_ALL`. Zwei Wahrheiten für dieselbe Liste — eine neue Sprache müsste an beiden Stellen nachgetragen werden |
 | C4 | **Tote CSS-Selektoren** | `utils/styles.py:14,20` | Die Selektoren erwarten `aria-label="Decoded text (word-by-word)"`. `pages/0_Start.py:190-193` labelt das Textarea `"Decoded"` mit `label_visibility="collapsed"`. **Die Farbtönung ist auf der aktiven Seite wirkungslos** — das Feature sieht implementiert aus und ist es nicht |
 | C5 | **`psycopg2` in einem Skript** | `scripts/load_dictcc_to_db.py:8,9,104` | psycopg2 wurde projektweit durch psycopg v3 ersetzt und steht nicht mehr in `requirements.txt`. Das Skript ist damit **nicht lauffähig** |
-| C6 | **`pandas` undeklariert** | `requirements.txt` | Kommt heute nur transitiv über Streamlit. Sobald die Tokentabelle es direkt nutzt, gehört es explizit hinein — und der Import in `domain/` **lazy**, damit der Test-Harness ohne Streamlit importierbar bleibt |
-| C7 | **Reservierter, nie gefüllter Slot** | `services/llm_service.py:226,245,273` | `line_results[idx]["comments"]` ist immer `""`. Entweder befüllen oder im Docstring als das kennzeichnen, was er ist: ein reservierter **Diagnose**-Slot, kein Ort für linguistische Inhalte |
+| C6 | **Reservierter, nie gefüllter Slot** | `services/llm_service.py:226,245,273` | `line_results[idx]["comments"]` ist immer `""`. Entweder befüllen oder im Docstring als das kennzeichnen, was er ist: ein reservierter **Diagnose**-Slot |
 
 ---
 
@@ -146,7 +141,7 @@ alle drei Stellen lesen.
 
 Die Tabs werden über bedingtes `append` gebaut, und der Zugriff läuft über einen von Hand
 mitgeführten `idx`, der bei jedem optionalen Tab hochgezählt wird. Bei vier Tabs geht das noch
-gut; ein **fünfter bedingter Tab** — etwa die geplante Tokentabelle — ist ein Bug in Wartestellung.
+gut; ein **fünfter bedingter Tab** ist ein Bug in Wartestellung.
 
 **Vorschlag:** vor der Erweiterung auf eine Liste aus `(Label, Renderfunktion)` umstellen und mit
 `st.tabs` zippen. Dann verschwindet der Zähler.
@@ -158,8 +153,7 @@ gut; ein **fünfter bedingter Tab** — etwa die geplante Tokentabelle — ist e
 
 Eine einzige neue Einstellung berührt **fünf Stellen plus eine Migration**, weil `save()`
 keyword-only mit fester Signatur arbeitet. Das ist heute vertretbar (fünf Einstellungen), wird aber
-zum Bremsklotz, sobald das Konzept mehr Schalter bringt (Enrichment an/aus, Muttersprache,
-Standardsprachpaar, Stimme pro Sprache — alles in `TODO.md` bereits gefordert).
+zum Bremsklotz, sobald weitere Einstellungen dazukommen.
 
 **Vorschlag:** beim nächsten Einstellungsschub auf ein Key/Value- oder JSONB-Modell wechseln, nicht
 vorher. Kein akuter Handlungsbedarf, aber bewusst zu entscheiden statt zu erleiden.
@@ -168,10 +162,9 @@ vorher. Kein akuter Handlungsbedarf, aber bewusst zu entscheiden statt zu erleid
 
 **`sql/schema.sql:166-175`**, `audio_files.data BYTEA`
 
-Bei der Mengenrechnung für die Tokentabelle fiel auf: eine Handvoll MP3s erschöpft ein
-0,5-GB-Neon-Free-Projekt **lange vor** jeder linguistischen Tabelle. Die Auslagerung in
-Objektspeicher ist unabhängig vom Vokabeluniversum fällig und dringlicher, als die Tokenmengen es
-je werden.
+Eine Handvoll MP3s erschöpft ein 0,5-GB-Neon-Free-Projekt sehr schnell — deutlich schneller als
+jede reine Textmenge im Schema. Die Auslagerung in Objektspeicher ist schon heute fällig,
+unabhängig von jeder künftigen Erweiterung.
 
 ### D5 — `user_dictionary` kann keine Homographen abbilden
 
@@ -181,9 +174,9 @@ je werden.
 unmöglich**, zwei Bedeutungen desselben Worts zu speichern — `Bank`(Möbel) und `Bank`(Geld)
 schließen einander aus.
 
-Das ist genau die Lücke, die die Lexem-Schicht im
-[Vokabeluniversum-Konzept](vokabeluniversum_concept.md) §4.1 schließt. Die Bedingung **jetzt nicht
-anfassen**; ihr späterer Wegfall braucht eine Dedup-Geschichte für Bestandsdaten.
+**Vorschlag:** die Eindeutigkeit um eine Sinn-/Homograph-Kennung erweitern (z.B. eine zusätzliche
+Spalte oder ein Disambiguierungsfeld). Die Bedingung **jetzt nicht anfassen**; ihr späterer
+Wegfall braucht eine Dedup-Geschichte für Bestandsdaten.
 
 ---
 
@@ -198,8 +191,7 @@ Kein Codefehler, aber im Review aufgefallen und wichtiger als die meisten Punkte
 Microservice hinter einer API. Die naheliegende Python-EPUB-Bibliothek (EbookLib) ist **ebenfalls
 AGPL**.
 
-Für einen privaten Prototyp unkritisch. **Vor einer Kommerzialisierung zu klären** — unabhängig von
-jeder Technologiewahl. Details und Alternativen in [`target_architecture.md`](target_architecture.md).
+Für einen privaten Prototyp unkritisch. **Vor einer Kommerzialisierung zu klären.**
 
 ### E2 — Nutzereigene API-Keys tragen kein Consumer-Produkt
 
@@ -233,15 +225,14 @@ Nach Verhältnis von Nutzen zu Aufwand:
 | 2 | **A2** — `_LANG_NAMES` als Fallback | wenige Zeilen, hebt alle künftigen Sprachpaare |
 | 3 | **B2** — Größen-Assertion | wenige Zeilen |
 | 4 | **C1, C2, C4, C5** — toter Code | trivial, macht das Repo ehrlich |
-| 5 | **A1** — `zip`-Kürzung | überschaubar, **zwingend vor der Token-Persistenz** |
-| 6 | **C3, D2** — Duplikat und Tab-Zähler | klein, **D2 vor der Tokentabelle** |
+| 5 | **A1** — `zip`-Kürzung | überschaubar, behebt eine stille Fehlerquelle |
+| 6 | **C3, D2** — Duplikat und Tab-Zähler | klein |
 | 7 | **D4** — Audio in Objektspeicher | eigener Branch, unabhängig |
 | 8 | **E1, E2, E3** — Lizenz und Datenschutz | keine Codearbeit, aber Entscheidungen |
 
-Nicht angefasst werden sollten: **D3** (erst beim nächsten Einstellungsschub), **D5** (erst mit der
-Lexem-Schicht), **D1** (erst wenn ein dritter Provider ansteht).
+Nicht angefasst werden sollten: **D3** (erst beim nächsten Einstellungsschub), **D5** (erst wenn
+Homograph-Support gebraucht wird), **D1** (erst wenn ein dritter Provider ansteht).
 
 ---
 
-*Erstellt 2026-08-08 auf Branch `verbiverse-concept`. Alle Befunde gegen den Code dieses Branches
-verifiziert.*
+*Erstellt 2026-08-08. Alle Befunde gegen den damaligen Code verifiziert.*

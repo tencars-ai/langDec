@@ -186,7 +186,6 @@ Set in `.streamlit/secrets.toml` for local dev, Streamlit Cloud secrets for depl
 - `requirements.txt` – Python dependencies
 - `documents/decoder-prompting-rules.md` – **the authority on decode behaviour**; read before
   touching any prompt
-- `documents/vokabeluniversum_overview.md` – entry point to the current concept work
 
 ## Documentation status (2026-08-08)
 
@@ -196,7 +195,7 @@ Several documents in `documents/` have drifted from the code and are being corre
 | Document | State |
 |---|---|
 | `decoder-prompting-rules.md` | current, verified against code — the authority |
-| `vokabeluniversum_*.md`, `target_architecture.md`, `cross_lingual_similarity_concept.md`, `coding_standards.md`, `code_review_2026-08.md` | new, 2026-08-08 |
+| `code_review_2026-08.md` | new, 2026-08-08 — code-only findings against this codebase |
 | `software-architecture.md` | **stale**: describes a JSON decoder (`BIRKENBIHL_JSON_SCHEMA`) that no longer exists |
 | `adding_translation_services.md` | **stale**: references `AVAILABLE_SERVICES` in `app.py`, which does not exist |
 | `technical_implementation_plan.md`, `technical_concept_prototype_stack_tooling.md` | partly stale: page names, and an incorrect claim that auth uses streamlit-authenticator |
