@@ -19,6 +19,24 @@ user_id = st.session_state.user_id
 db = DBService()
 audio_svc = AudioStorageService(db)
 
+
+@st.dialog("Fullscreen", width="large")
+def _fullscreen_dialog(title: str, content: str, as_info: bool = False) -> None:
+    st.markdown(f"#### {title}")
+    if as_info:
+        st.info(content)
+    else:
+        st.text_area(
+            title, value=content, height=500, label_visibility="collapsed", disabled=True,
+        )
+
+
+def _fullscreen_button(key: str) -> bool:
+    _, btn_col = st.columns([5, 1])
+    with btn_col:
+        return st.button("⛶ Fullscreen", key=key, use_container_width=True)
+
+
 st.title("Text Library")
 
 # --- Flash messages ---
@@ -149,21 +167,29 @@ else:
                         tabs = st.tabs(tab_labels)
                         idx = 0
                         with tabs[idx]:
+                            if _fullscreen_button(f"fs_content_{text['text_id']}"):
+                                _fullscreen_dialog("Original", content_val)
                             st.text_area("Content", value=content_val, height=150,
                                          key=f"content_{text['text_id']}", disabled=True)
                         if decoded_val:
                             idx += 1
                             with tabs[idx]:
+                                if _fullscreen_button(f"fs_decoded_{text['text_id']}"):
+                                    _fullscreen_dialog("Decoded", decoded_val)
                                 st.text_area("Decoded", value=decoded_val, height=150,
                                              key=f"decoded_{text['text_id']}", disabled=True)
                         if translated_val:
                             idx += 1
                             with tabs[idx]:
+                                if _fullscreen_button(f"fs_translated_{text['text_id']}"):
+                                    _fullscreen_dialog("Translation", translated_val)
                                 st.text_area("Translation", value=translated_val, height=150,
                                              key=f"translated_{text['text_id']}", disabled=True)
                         if notes_val:
                             idx += 1
                             with tabs[idx]:
+                                if _fullscreen_button(f"fs_notes_{text['text_id']}"):
+                                    _fullscreen_dialog("Hints", notes_val, as_info=True)
                                 st.info(notes_val)
 
                         # Audio playback
