@@ -6,6 +6,9 @@ _BASE_CSS = """
   h1 { font-size: 1.8rem !important; margin-top: 0.5rem !important; margin-bottom: 0.3rem !important; }
   textarea { font-family: "Consolas", "Courier New", monospace !important; font-size: 14px !important; line-height: 1.5 !important; }
   .stDownloadButton > button { background-color: white !important; border: 1px solid #DADCE0 !important; color: black !important; }
+  /* Read-only (disabled) textareas default to low-contrast grey-on-grey — force readable text. */
+  textarea:disabled { color: #31333F !important; -webkit-text-fill-color: #31333F !important; opacity: 1 !important; }
+  .stTextArea:has(textarea:disabled) { opacity: 1 !important; }
 </style>
 """
 
